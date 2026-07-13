@@ -20,6 +20,183 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 
+if(APPLE)
+    # Dobby's debug mode is a configure-time option, so one Dobby target cannot
+    # differ between Debug and Release in a multi-config build tree. Keep the
+    # two configurations isolated under build/macos/{Debug,Release}; build.sh
+    # drives both trees with the same workflow as build.bat on Windows.
+    get_property(OPENSTEAMTOOL_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(OPENSTEAMTOOL_MULTI_CONFIG)
+        message(FATAL_ERROR
+            "macOS requires a single-config generator so Dobby Debug/Release settings stay isolated. "
+            "Run ./build.sh (or configure separate Debug and Release build directories).")
+    endif()
+
+    if(NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "macOS build configuration" FORCE)
+    endif()
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND
+       NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+        message(FATAL_ERROR "macOS supports only Debug or Release builds (got '${CMAKE_BUILD_TYPE}').")
+    endif()
+    message(STATUS "OpenSteamTool macOS configuration: ${CMAKE_BUILD_TYPE}")
+
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+    # Make shared dependency recipes available before adding OSTPlatform.
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+    include(SteamMonitorData)
+    opensteamtool_embed_steam_monitor_data(STEAM_MONITOR_DATA_HEADER
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../steam-monitor"
+        OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    )
+
+    # Log.h includes this generated header in both Debug and Release.
+    include(LogMacros)
+
+    # Shared runtime dependencies.
+    include(Lua)
+    include(Tomlplusplus)
+    include(Protobuf)
+    include(Spdlog)
+
+    # SteamDiagnostics.cpp #includes the generated OpenSteamToolBuildInfo.h for
+    # OPENSTEAMTOOL_VERSION; generate it the same way the Windows path does.
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/OpenSteamToolBuildInfo.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/OpenSteamToolBuildInfo.h"
+        @ONLY
+    )
+
+    # Generate IPC metadata with the same host tool used by Windows.
+    set(OPENSTEAMTOOL_TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools")
+    add_subdirectory("${OPENSTEAMTOOL_TOOLS_DIR}" "${CMAKE_BINARY_DIR}/tools" EXCLUDE_FROM_ALL)
+    include("${OPENSTEAMTOOL_TOOLS_DIR}/cmake/IPCCodegen.cmake")
+    opensteamtool_add_ipc_codegen(IPC_GEN
+        IDL "${CMAKE_CURRENT_SOURCE_DIR}/Steam/IPCMessages.steamd"
+        CPP_OUT "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    )
+
+    # Match Windows protobuf variants: full in Debug, lite in Release.
+    set(PROTO_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    add_custom_command(
+        OUTPUT "${PROTO_GEN_DIR}/steam_messages.pb.cc"
+               "${PROTO_GEN_DIR}/steam_messages.pb.h"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PROTO_GEN_DIR}"
+        COMMAND $<TARGET_FILE:protoc>
+            "--cpp_out=$<$<CONFIG:Release>:lite:>${PROTO_GEN_DIR}"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/proto"
+            "${CMAKE_CURRENT_SOURCE_DIR}/proto/steam_messages.proto"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/proto/steam_messages.proto" protoc
+        COMMENT "Generating protobuf C++ sources (${CMAKE_BUILD_TYPE})"
+        VERBATIM
+    )
+
+    add_subdirectory(OSTPlatform)
+
+    add_library(OpenSteamToolMacOS SHARED
+        # macOS entry point and pattern backend
+        dllmain_macos.cpp
+        Utils/SteamMetadata/PatternLoader_macos.cpp
+        "${STEAM_MONITOR_DATA_HEADER}"
+
+        # Configuration, logging, and hook support
+        Utils/Config/LuaConfig.cpp
+        Utils/Logging/Log_macos.cpp
+        Utils/HookSupport/VehCommon_macos.cpp
+
+        # Platform-specific hooks
+        Hook/Hooks_Package_macos.cpp
+        Utils/SteamMetadata/StatsClient.cpp
+        Utils/Tickets/AppTicket.cpp
+        Hook/Hooks_SteamUI_macos.cpp
+
+        # Shared hook modules
+        Hook/Hooks_Manifest.cpp
+        Hook/Hooks_Decryption.cpp
+        Hook/Hooks_CallBack.cpp
+        Hook/Hooks_KeyValues.cpp
+        Hook/Hooks_Misc.cpp
+        Hook/PendingAPICalls.cpp
+        Hook/Hooks_NetPacket.cpp
+        "${PROTO_GEN_DIR}/steam_messages.pb.cc"
+
+        # Configuration and metadata services
+        Utils/Config/Config.cpp
+        Utils/Config/ConfigFileWatcher_macos.cpp
+        Utils/Config/LuaFileWatcher_macos.cpp
+        Utils/SteamMetadata/SteamDiagnostics_macos.cpp
+        Utils/SteamMetadata/ManifestClient.cpp
+        Utils/SteamMetadata/IPCLoader_macos.cpp
+
+        # Excluded-feature stubs and shared pipe subsystem
+        Utils/CloudRedirect/CloudRedirectHost_macos.cpp
+        Pipe/PipeManager.cpp
+        Pipe/ProcessInspector.cpp
+        Pipe/Features/Injection/Injection.cpp
+        Pipe/Features/DenuvoAuth/DenuvoAuth_macos.cpp
+
+        # IPC and hook aggregation
+        Hook/Hooks_IPC_macos.cpp
+        Hook/Hooks_IPC_ISteamUser.cpp
+        Hook/Hooks_IPC_ISteamUtils.cpp
+        Hook/HookManager.cpp
+
+        "${IPC_GEN}"
+    )
+
+    target_include_directories(OpenSteamToolMacOS PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+    )
+
+    target_link_libraries(OpenSteamToolMacOS PRIVATE
+        OSTPlatform
+        lua_static
+        dobby
+        tomlplusplus::tomlplusplus
+        $<$<CONFIG:Debug>:libprotobuf>
+        $<$<CONFIG:Release>:libprotobuf-lite>
+        $<$<CONFIG:Debug>:spdlog::spdlog>
+    )
+
+    # Hook/HookMacros.h stamps __fastcall onto every hooked signature; arm64
+    # clang correctly ignores the calling convention but warns. Silence it
+    # here rather than touching the shared header.
+    target_compile_options(OpenSteamToolMacOS PRIVATE
+        -Wno-ignored-attributes
+    )
+
+    # Match Windows: Debug compiles the shared spdlog backend and every LOG_*
+    # call in *_macos.cpp; Release turns those calls into no-ops.
+    target_compile_definitions(OpenSteamToolMacOS PRIVATE
+        $<$<CONFIG:Debug>:OPENSTEAMTOOL_LOGGING_ENABLED>
+        $<$<CONFIG:Debug>:OPENSTEAMTOOL_DOBBY_DEBUG>
+    )
+
+    # Keep the CMake target name (OpenSteamToolMacOS) but emit the artifact as
+    # libOpenSteamTool.dylib, matching the Windows OpenSteamTool naming and what
+    # steam-inject.sh / dllmain_macos.cpp's GetLoaded() expect.
+    set_target_properties(OpenSteamToolMacOS PROPERTIES OUTPUT_NAME OpenSteamTool)
+
+    # Windows Debug emits a PDB. The macOS equivalent is a dSYM bundle next to
+    # the Debug dylib, generated after every successful Debug link.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        find_program(DSYMUTIL_EXECUTABLE dsymutil REQUIRED)
+        add_custom_command(TARGET OpenSteamToolMacOS POST_BUILD
+            COMMAND "${DSYMUTIL_EXECUTABLE}"
+                    "$<TARGET_FILE:OpenSteamToolMacOS>"
+                    -o "$<TARGET_FILE:OpenSteamToolMacOS>.dSYM"
+            COMMENT "Generating libOpenSteamTool.dylib.dSYM"
+            VERBATIM
+        )
+    endif()
+
+    return()
+endif()
+
 if(NOT WIN32)
     message(STATUS "OpenSteamTool: no targets on non-Windows platforms; skipping.")
     return()

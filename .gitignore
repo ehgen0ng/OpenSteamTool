@@ -21,3 +21,12 @@ build/
 
 # DLLs (keep only source files)
 !.deps/**/*.dll
+
+# macOS
+.DS_Store
+
+# Local Steam monitor data
+/steam-monitor/
+
+# Documentation drafts
+/docs/**/*.md

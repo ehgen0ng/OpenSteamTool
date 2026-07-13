@@ -1,0 +1,33 @@
+// Generated from root-level steam-monitor TOML files. Do not edit.
+#pragma once
+
+#include <array>
+#include <string_view>
+
+namespace SteamMonitorData {
+
+struct Entry {
+    std::string_view channel;
+    std::string_view component;
+    std::string_view sha256;
+    std::string_view body;
+};
+
+inline constexpr std::array<Entry, @STEAM_MONITOR_ENTRY_COUNT@> kEntries = {{
+@STEAM_MONITOR_ENTRIES@}};
+
+constexpr const Entry* Find(std::string_view channel,
+                            std::string_view component,
+                            std::string_view sha256)
+{
+    for (const auto& entry : kEntries) {
+        if (entry.channel == channel &&
+            entry.component == component &&
+            entry.sha256 == sha256) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace SteamMonitorData

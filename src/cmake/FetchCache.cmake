@@ -29,10 +29,20 @@ if(NOT DEFINED OST_DEPS_DIR)
         "${CMAKE_CURRENT_LIST_DIR}/../../.deps" ABSOLUTE)
 endif()
 
-# For each known dependency, if a source dir is already cached at the shared
-# location, point FetchContent at it so populate becomes a no-op.
+# For each dependency used by the current platform, if a source dir is already
+# cached at the shared location, point FetchContent at it so populate becomes a
+# no-op. Do not let an irrelevant platform dependency (Detours on macOS or
+# Dobby on Windows) force otherwise-isolated build trees back into the shared
+# first-populate directory.
+set(_OST_FETCH_DEPS lua spdlog protobuf tomlplusplus)
+if(WIN32)
+    list(APPEND _OST_FETCH_DEPS detours)
+elseif(APPLE)
+    list(APPEND _OST_FETCH_DEPS dobby)
+endif()
+
 set(_OST_ALL_CACHED TRUE)
-foreach(_dep IN ITEMS lua detours spdlog protobuf tomlplusplus)
+foreach(_dep IN LISTS _OST_FETCH_DEPS)
     string(TOUPPER "${_dep}" _UPPER)
     set(_src "${OST_DEPS_DIR}/${_dep}-src")
     if(IS_DIRECTORY "${_src}")
