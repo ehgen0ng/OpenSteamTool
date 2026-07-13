@@ -1,7 +1,9 @@
 #include "dllmain.h"
 #include "Hook/HookManager.h"
+#include "Pipe/Features/Injection/Injection.h"
 #include "Utils/Config/ConfigFileWatcher.h"
 #include "Utils/Config/LuaFileWatcher.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
 #include "Utils/SteamMetadata/IPCLoader.h"
 #include "Utils/SteamMetadata/PatternLoader.h"
@@ -15,15 +17,19 @@
 bool InitializeSteamComponents()
 {
     const std::string steamInstallPath = OSTPlatform::DynamicLibrary::GetCurrentDirectoryPath();
-    if (steamInstallPath.empty()) {
+    const std::string luaDir = RuntimePaths::LuaDirectory().string();
+    const std::string configPath = RuntimePaths::ConfigFile().string();
+    if (steamInstallPath.empty() || luaDir.empty() || configPath.empty()) {
         return false;
     }
     sprintf_s(SteamInstallPath, kRuntimePathCapacity, "%s", steamInstallPath.c_str());
     sprintf_s(SteamclientPath, kRuntimePathCapacity, "%s\\steamclient64.dll",  SteamInstallPath);
     sprintf_s(SteamUIPath,     kRuntimePathCapacity, "%s\\steamui.dll",        SteamInstallPath);
     sprintf_s(DiversionPath,   kRuntimePathCapacity, "%s\\bin\\diversion.dll", SteamInstallPath);
-    sprintf_s(LuaDir,          kRuntimePathCapacity, "%s\\config\\lua",        SteamInstallPath);
-    sprintf_s(ConfigPath,      kRuntimePathCapacity, "%s\\opensteamtool.toml", SteamInstallPath);
+    if (sprintf_s(LuaDir, kRuntimePathCapacity, "%s", luaDir.c_str()) < 0 ||
+        sprintf_s(ConfigPath, kRuntimePathCapacity, "%s", configPath.c_str()) < 0) {
+        return false;
+    }
     
     client_hModule = OSTPlatform::DynamicLibrary::Load(SteamclientPath);
     if (!client_hModule) {
@@ -45,6 +51,7 @@ bool InitializeSteamComponents()
 // memory, or installs detours runs here on a worker thread — we MUST NOT do
 // any of that from inside DllMain (loader lock).
 static uint32_t InitThread(OSTPlatform::DynamicLibrary::ModuleHandle selfModule) {
+    if (RuntimePaths::EnsureDataDirectories()) return 1;
     Log::Init(selfModule);
     LOG_INFO("OpenSteamTool init thread started");
 
@@ -53,9 +60,19 @@ static uint32_t InitThread(OSTPlatform::DynamicLibrary::ModuleHandle selfModule)
         return 1;
     }
 
+    const auto migration = RuntimePaths::MigrateLegacyUserFiles(SteamInstallPath);
+    for (const auto& file : migration.files) {
+        if (file.outcome == RuntimePaths::TransferOutcome::Conflict ||
+            file.outcome == RuntimePaths::TransferOutcome::Failed) {
+            LOG_WARN("Migration {}: {} -> {} ({})", RuntimePaths::ToString(file.outcome),
+                     file.source.string(), file.destination.string(), file.error.message());
+        }
+    }
+
     Config::Load(ConfigPath);
     Log::InitModules();
     Log::InstallPlatformLogSink();
+    PipeManager::Injection::MigrateConfiguredLibraries();
     SteamDiagnostics::Initialize(SteamclientPath, SteamUIPath);
 
     // Load pattern files for steamclient64.dll and steamui.dll.

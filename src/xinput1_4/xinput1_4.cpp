@@ -1,4 +1,6 @@
 // xinput1_4.dll HiJack Project - True Dynamic Wrapper (With Undocumented Ordinals)
+#include "../Loader/LoaderBootstrap.h"
+
 #include <windows.h>
 #include <cstring>
 #include <string>
@@ -127,7 +129,7 @@ BOOL OpenSteamToolLoad() {
         exeName = exeName ? exeName + 1 : exePath;
         if (_stricmp(exeName, "steam.exe") != 0) return TRUE;
     }
-    return LoadLibraryA("OpenSteamTool.dll") != NULL;
+    return LoaderBootstrap::LoadOpenSteamToolForSteamProcess() ? TRUE : FALSE;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved) {

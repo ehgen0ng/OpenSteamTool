@@ -6,6 +6,7 @@
 #include "Utils/Config/ConfigFileWatcher.h"
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Config/LuaFileWatcher.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
 #include "Utils/SteamMetadata/IPCLoader.h"
 #include "Utils/SteamMetadata/PatternLoader.h"
@@ -193,11 +194,21 @@ void RunGlobalInit(const SteamImageInfo& steamClient) {
     // Mirrors Windows dllmain.cpp's InitThread order: Log::Init (needs only
     // our own module handle, picks the log directory) before Config::Load,
     // Log::InitModules (needs Config for the log dir/level) right after.
-    const std::filesystem::path root = SteamRootDir();
-    const std::string configPath = root.empty() ? std::string{} : (root / "opensteamtool.toml").string();
-    const std::string luaDir     = root.empty() ? std::string{} : (root / "config" / "lua").string();
+    if (RuntimePaths::EnsureDataDirectories()) return;
+
+    const std::filesystem::path steamRoot = SteamRootDir();
+    const std::string configPath = RuntimePaths::ConfigFile().string();
+    const std::string luaDir = RuntimePaths::LuaDirectory().string();
+    const auto migration = RuntimePaths::MigrateLegacyUserFiles(steamRoot);
 
     Log::Init(OSTPlatform::DynamicLibrary::GetLoaded("libOpenSteamTool.dylib"));
+    for (const auto& file : migration.files) {
+        if (file.outcome == RuntimePaths::TransferOutcome::Conflict ||
+            file.outcome == RuntimePaths::TransferOutcome::Failed) {
+            LOG_WARN("Migration {}: {} -> {} ({})", RuntimePaths::ToString(file.outcome),
+                     file.source.string(), file.destination.string(), file.error.message());
+        }
+    }
 #if defined(OPENSTEAMTOOL_DOBBY_DEBUG)
     LOG_INFO("Dobby debug logging enabled (disable with CMake flag -DDOBBY_DEBUG=OFF)");
 #endif

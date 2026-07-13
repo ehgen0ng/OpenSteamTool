@@ -1,8 +1,10 @@
 #include "CloudRedirectHost.h"
 
 #include "OSTPlatform/include/DynamicLibrary.h"
+#include "OSTPlatform/include/Encoding.h"
 #include "Utils/Config/Config.h"
 #include "Utils/Config/LuaConfig.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/Logging/Log.h"
 
 #include <atomic>
@@ -63,13 +65,34 @@ namespace {
 
     std::filesystem::path ResolveLibraryPath(const std::string& steamRoot,
                                              const std::string& configured) {
-        if (configured.empty())
-            return std::filesystem::path(steamRoot) / "cloud_redirect.dll";
+        const std::filesystem::path legacyRoot(
+            OSTPlatform::Encoding::Utf8ToWide(steamRoot));
+        std::filesystem::path library;
+        std::filesystem::path current;
+        if (configured.empty()) {
+            library = L"cloud_redirect.dll";
+            if (!RuntimePaths::PluginDirectory().empty()) {
+                current = RuntimePaths::PluginDirectory() / library;
+            }
+        } else {
+            library = std::filesystem::path(
+                OSTPlatform::Encoding::Utf8ToWide(configured));
+            if (library.is_absolute()) return library;
+            if (!RuntimePaths::DataRoot().empty()) {
+                current = RuntimePaths::DataRoot() / library;
+            }
+        }
+        if (library.empty()) return {};
 
-        std::filesystem::path lib(configured);
-        if (lib.is_absolute())
-            return lib;
-        return std::filesystem::path(steamRoot) / lib;
+        const auto result = RuntimePaths::MigrateAndSelectFile(
+            legacyRoot / library, current);
+        if (result.transfer.outcome == RuntimePaths::TransferOutcome::Conflict ||
+            result.transfer.outcome == RuntimePaths::TransferOutcome::Failed) {
+            LOG_WARN("CloudRedirect: migration {} ({} -> {})",
+                     RuntimePaths::ToString(result.transfer.outcome),
+                     result.transfer.source.string(), current.string());
+        }
+        return result.path;
     }
 
     template <typename T>
@@ -87,19 +110,22 @@ namespace {
 
 void Initialize(const char* steamInstallPath) {
     const Config::CloudSettings cloud = Config::GetCloudSettings();
-    if (!cloud.enabled) {
-        LOG_INFO("CloudRedirect: [cloud].enabled is false, cloud save redirection disabled");
+    if (!steamInstallPath || steamInstallPath[0] == '\0') {
+        if (cloud.enabled) {
+            LOG_WARN("CloudRedirect: empty Steam install path, cannot initialise");
+        }
         return;
     }
-    if (!steamInstallPath || steamInstallPath[0] == '\0') {
-        LOG_WARN("CloudRedirect: empty Steam install path, cannot initialise");
+
+    const std::filesystem::path libPath = ResolveLibraryPath(steamInstallPath, cloud.library);
+    if (!cloud.enabled) {
+        LOG_INFO("CloudRedirect: [cloud].enabled is false, cloud save redirection disabled");
         return;
     }
 
     std::lock_guard lock(g_mutex);
     if (g_active.load(std::memory_order_acquire)) return;
 
-    const std::filesystem::path libPath = ResolveLibraryPath(steamInstallPath, cloud.library);
     if (!std::filesystem::exists(libPath)) {
         LOG_WARN("CloudRedirect: cloud_redirect.dll not found at {}", libPath.string());
         return;

@@ -5,6 +5,7 @@
 #include "OSTPlatform/include/DynamicLibrary.h"
 #include "OSTPlatform/include/Log.h"
 #include "Utils/Config/Config.h"
+#include "Utils/Config/RuntimePaths.h"
 #include <atomic>
 #include <filesystem>
 #include <string>
@@ -76,11 +77,15 @@ namespace Log {
     void Init(OSTPlatform::DynamicLibrary::ModuleHandle selfModule) {
         bool expected = false;
         if (!g_mainReady.compare_exchange_strong(expected, true)) return;
+        (void)selfModule;
 
         try {
-            auto dir = OSTPlatform::DynamicLibrary::GetModuleDirectory(selfModule);
-            if (dir.empty()) dir = ".";
-            auto logDir = (dir / "opensteamtool").string();
+            const auto dir = RuntimePaths::LogDirectory();
+            if (dir.empty()) {
+                g_mainReady.store(false);
+                return;
+            }
+            const auto logDir = dir.string();
             std::filesystem::create_directories(logDir);
             Main = MakeLogger(logDir, "main");
             Main->set_level(spdlog::level::trace);  // early boot: log everything

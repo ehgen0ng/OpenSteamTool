@@ -1,5 +1,12 @@
 # opensteamtool.toml — OpenSteamTool configuration
-# Place at: <Steam>/opensteamtool.toml
+# Windows: %LOCALAPPDATA%\OpenSteamTool\opensteamtool.toml
+# macOS:   ~/Library/Application Support/OpenSteamTool/opensteamtool.toml
+# OST_DATA_DIR overrides the OpenSteamTool data root.
+# Windows DLL layout:
+#   <Steam>\dwmapi.dll and <Steam>\xinput1_4.dll stay next to steam.exe.
+#   OpenSteamTool.dll belongs at:
+#   %LOCALAPPDATA%\OpenSteamTool\bin\OpenSteamTool.dll
+#   A legacy <Steam>\OpenSteamTool.dll is verified, migrated, then deleted.
 # This file is loaded at startup and hot-reloaded after changes.
 
 [log]
@@ -12,7 +19,7 @@ level = "debug"
 #   "opensteamtool" → https://manifest.opensteamtool.com/{gid}   (default)
 #   "wudrm"         → http://gmrc.wudrm.com/manifest/{gid} (recommended for China users)
 #   "steamrun"      → https://manifest.steam.run/api/manifest/{gid}
-# If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid) or
+# If <OpenSteamTool data root>/lua/manifest.lua defines fetch_manifest_code(gid) or
 # fetch_manifest_code_ex(app_id, depot_id, gid), those Lua functions take
 # priority over the url setting below.
 #
@@ -63,8 +70,8 @@ timeout_recv_ms    = 10000
 enable_api = true
 
 # Additional Lua config directories (optional).
-# Files are loaded after the default <Steam>/config/lua folder.
-# The default folder is always loaded last so user files take priority.
+# Every configured directory is loaded in array order, in addition to the
+# default <OpenSteamTool data root>/lua folder.
 # Example — load a custom directory on another drive:
 #   [lua]
 #   paths = ["D:/my-steam-config/lua"]
@@ -74,9 +81,10 @@ enable_api = true
 [inject]
 # Optional library injection into game processes.
 # The injected library must match the target process architecture.
+# Relative paths are resolved from the OpenSteamTool data root.
 enabled = false
-# library_x64 = "OpenSteamTool.GameHook.x64.dll"
-# library_x86 = "OpenSteamTool.GameHook.x86.dll"
+# library_x64 = "plugins/OpenSteamTool.GameHook.x64.dll"
+# library_x86 = "plugins/OpenSteamTool.GameHook.x86.dll"
 
 [cloud]
 # Optional Steam Cloud save redirection for unlocked ("lua") games, powered by
@@ -88,9 +96,9 @@ enabled = false
 # Provider sign-in (Google Drive / OneDrive / local folder) is still done through
 # CloudRedirect's own companion app — OpenSteamTool only hosts the DLL.
 enabled = false
-# Path to cloud_redirect.dll. Absolute, or relative to the Steam root directory.
-# Defaults to "<Steam>/cloud_redirect.dll" when unset.
-# library = "cloud_redirect.dll"
+# Path to cloud_redirect.dll. Absolute, or relative to the OpenSteamTool data root.
+# Defaults to "<OpenSteamTool data root>/plugins/cloud_redirect.dll" when unset.
+# library = "plugins/cloud_redirect.dll"
 
 [remote]
 # Optional metadata mirror. Leave unset to use GitHub with jsDelivr fallback.

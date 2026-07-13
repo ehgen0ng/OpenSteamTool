@@ -3,6 +3,7 @@
 #include "OSTPlatform/include/Numbers.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/RemoteToml.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
 
 #include <unordered_map>
@@ -138,6 +139,9 @@ namespace {
 
     static void ShowMissingPopup(const std::string& sha256)
     {
+        const std::string manualPath =
+            (RuntimePaths::CacheDirectory() / "ipc" / "steamclient" /
+             (sha256 + ".toml")).string();
         SteamDiagnostics::ShowWarning(
             "OpenSteamTool - IPC spec missing",
             "OpenSteamTool: IPC spec file not found.\n\n"
@@ -146,7 +150,7 @@ namespace {
             "You can:\n"
             "  1. Wait for the next upstream publish and restart Steam.\n"
             "  2. Drop a matching TOML at:\n"
-            "       <Steam>\\opensteamtool\\ipc\\steamclient\\" + sha256 + ".toml\n"
+            "       " + manualPath + "\n"
             "  3. Check upstream:\n"
             "       https://github.com/OpenSteam001/steam-monitor/tree/ipc/steamclient");
     }

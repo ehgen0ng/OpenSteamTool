@@ -1,6 +1,7 @@
 #include "RemoteToml.h"
 #include "OSTPlatform/include/Http.h"
 #include "Utils/Config/Config.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
 
@@ -89,13 +90,15 @@ Result Fetch(const Request& request)
              request.channel, request.component, out.sha256, hashMs);
 
     // 2. Cache path & dir.
-    fs::path steamRoot = fs::path(request.dllPath).parent_path();
-    fs::path cacheDir  = steamRoot / "opensteamtool" / request.channel / request.component;
-    fs::path cachePath = cacheDir / (out.sha256 + ".toml");
+    fs::path cacheDir = RuntimePaths::CacheDirectory();
+    if (!cacheDir.empty()) cacheDir /= fs::path(request.channel) / request.component;
+    fs::path cachePath = cacheDir.empty()
+        ? fs::path{}
+        : cacheDir / (out.sha256 + ".toml");
     const std::string cachePathText = cachePath.string();
 
     std::error_code mkdirEc;
-    fs::create_directories(cacheDir, mkdirEc);
+    if (!cacheDir.empty()) fs::create_directories(cacheDir, mkdirEc);
     if (mkdirEc) {
         LOG_WARN("RemoteToml({}/{}): could not create cache dir {} ({})",
                  request.channel, request.component, cacheDir.string(), mkdirEc.message());
@@ -130,7 +133,8 @@ Result Fetch(const Request& request)
 
     // 4. Remote OK → write cache, return body.
     if (http.ok && http.status == 200 && !http.body.empty()) {
-        std::ofstream ofs(cachePath, std::ios::binary);
+        std::ofstream ofs;
+        if (!cachePath.empty()) ofs.open(cachePath, std::ios::binary);
         if (ofs) {
             ofs.write(http.body.data(),
                       static_cast<std::streamsize>(http.body.size()));
@@ -146,7 +150,7 @@ Result Fetch(const Request& request)
     }
 
     // 5. Remote failed → fall back to whatever is cached for this exact SHA.
-    if (fs::exists(cachePath)) {
+    if (!cachePath.empty() && fs::exists(cachePath)) {
         LOG_WARN("RemoteToml({}/{}): remote failed (last URL {} HTTP {}); "
                  "falling back to local cache {}",
                  request.channel, request.component,

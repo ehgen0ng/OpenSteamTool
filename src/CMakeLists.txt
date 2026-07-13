@@ -104,6 +104,7 @@ if(APPLE)
 
         # Configuration, logging, and hook support
         Utils/Config/LuaConfig.cpp
+        Utils/Config/RuntimePaths.cpp
         Utils/Logging/Log_macos.cpp
         Utils/HookSupport/VehCommon_macos.cpp
 
@@ -284,6 +285,7 @@ add_library(OpenSteamTool SHARED
     Utils/Config/ConfigFileWatcher.cpp
     Utils/Config/LuaConfig.cpp
     Utils/Config/LuaFileWatcher.cpp
+    Utils/Config/RuntimePaths.cpp
     Utils/CloudRedirect/CloudRedirectHost.cpp
     Utils/HookSupport/VehCommon.cpp
     Utils/Logging/Log.cpp
@@ -350,6 +352,8 @@ target_compile_definitions(OpenSteamTool PRIVATE
 # ---------------------------------------------------------------------------
 add_library(dwmapi SHARED
     dwmapi/dwmapi.cpp
+    Loader/LoaderBootstrap.cpp
+    Utils/Config/RuntimePaths.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -358,4 +362,6 @@ add_library(dwmapi SHARED
 add_library(xinput1_4 SHARED
     xinput1_4/xinput1_4.cpp
     xinput1_4/xinput1_4.def
+    Loader/LoaderBootstrap.cpp
+    Utils/Config/RuntimePaths.cpp
 )

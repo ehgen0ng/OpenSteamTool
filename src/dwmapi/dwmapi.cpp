@@ -1,5 +1,7 @@
 // dwmapi.dll HiJack Project
 
+#include "../Loader/LoaderBootstrap.h"
+
 #include <windows.h>
 #include <cstring>
 
@@ -122,7 +124,7 @@ BOOL OpenSteamToolLoad()
         if (_stricmp(exeName, "steam.exe") != 0)
             return TRUE;   // not Steam — let the proxy load, but don't inject
     }
-    return LoadLibraryA("OpenSteamTool.dll") != NULL;
+    return LoaderBootstrap::LoadOpenSteamToolForSteamProcess() ? TRUE : FALSE;
 }
 
 

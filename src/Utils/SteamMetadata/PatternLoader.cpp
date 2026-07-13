@@ -3,6 +3,7 @@
 #include "OSTPlatform/include/Numbers.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/RemoteToml.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
 #include "Utils/Support/FnvHash.h"
 
@@ -148,6 +149,9 @@ static void ShowDownloadFailedPopup(const std::string& dllName,
                                     const std::string& sha256,
                                     const std::string& component)
 {
+    const std::string manualPath =
+        (RuntimePaths::CacheDirectory() / "pattern" / component /
+         (sha256 + ".toml")).string();
     SteamDiagnostics::ShowWarning(
         "OpenSteamTool - Unsupported Steam Version",
         "OpenSteamTool: signature file not found for " + dllName + ".\n\n"
@@ -156,7 +160,7 @@ static void ShowDownloadFailedPopup(const std::string& dllName,
         "You can:\n"
         "  1. Wait for the next signature update, then restart Steam.\n"
         "  2. Drop a matching TOML at:\n"
-        "       <Steam>\\opensteamtool\\pattern\\" + component + "\\" + sha256 + ".toml\n"
+        "       " + manualPath + "\n"
         "  3. Check upstream:\n"
         "       https://github.com/OpenSteam001/steam-monitor/tree/pattern/" + component + "\n"
         "  4. Report the diagnostics below:\n"

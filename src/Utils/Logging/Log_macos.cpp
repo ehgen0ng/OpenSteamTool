@@ -5,8 +5,8 @@
 #include "OSTPlatform/include/DynamicLibrary.h"
 #include "OSTPlatform/include/Log.h"
 #include "Utils/Config/Config.h"
+#include "Utils/Config/RuntimePaths.h"
 #include <atomic>
-#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -67,12 +67,6 @@ namespace {
             ToSpdlog(level), "{}", msg);
     }
 
-    std::filesystem::path SteamRuntimeRoot() {
-        const char* home = std::getenv("HOME");
-        if (!home || !home[0]) return {};
-        return std::filesystem::path(home) /
-               "Library" / "Application Support" / "Steam";
-    }
 }
 
 namespace Log {
@@ -80,14 +74,15 @@ namespace Log {
     void Init(OSTPlatform::DynamicLibrary::ModuleHandle selfModule) {
         bool expected = false;
         if (!g_mainReady.compare_exchange_strong(expected, true)) return;
+        (void)selfModule;
 
         try {
-            auto dir = SteamRuntimeRoot();
+            const auto dir = RuntimePaths::LogDirectory();
             if (dir.empty()) {
-                dir = OSTPlatform::DynamicLibrary::GetModuleDirectory(selfModule);
+                g_mainReady.store(false);
+                return;
             }
-            if (dir.empty()) dir = ".";
-            auto logDir = (dir / "opensteamtool").string();
+            const auto logDir = dir.string();
             std::filesystem::create_directories(logDir);
             Main = MakeLogger(logDir, "main");
             Main->set_level(spdlog::level::trace);

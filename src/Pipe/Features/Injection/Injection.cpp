@@ -3,6 +3,7 @@
 #include "OSTPlatform/include/RemoteProcess.h"
 #include "OSTPlatform/include/Encoding.h"
 #include "Utils/Config/Config.h"
+#include "Utils/Config/RuntimePaths.h"
 #include "Utils/Logging/Log.h"
 
 #include "dllmain.h"
@@ -30,10 +31,27 @@ namespace {
 
     std::filesystem::path ResolveLibraryPath(const std::string& configured) {
         std::filesystem::path path(OSTPlatform::Encoding::Utf8ToWide(configured));
+        if (path.empty()) return {};
         if (path.is_absolute()) return path;
 
-        std::filesystem::path base(OSTPlatform::Encoding::Utf8ToWide(SteamInstallPath));
-        return base / path;
+        const std::filesystem::path legacyRoot(
+            OSTPlatform::Encoding::Utf8ToWide(SteamInstallPath));
+        if (RuntimePaths::DataRoot().empty()) {
+            return legacyRoot.empty() ? path : legacyRoot / path;
+        }
+
+        const std::filesystem::path current = RuntimePaths::DataRoot() / path;
+        if (legacyRoot.empty()) return current;
+
+        const std::filesystem::path legacy = legacyRoot / path;
+        const auto result = RuntimePaths::MigrateAndSelectFile(legacy, current);
+        if (result.transfer.outcome == RuntimePaths::TransferOutcome::Conflict ||
+            result.transfer.outcome == RuntimePaths::TransferOutcome::Failed) {
+            LOG_PIPE_WARN("Injection: migration {} ({} -> {})",
+                          RuntimePaths::ToString(result.transfer.outcome),
+                          legacy.string(), current.string());
+        }
+        return result.path;
     }
 
     const std::string* ConfiguredLibraryFor(const Config::InjectionSettings& settings,
@@ -51,6 +69,14 @@ namespace {
     }
 
 } // namespace
+
+void MigrateConfiguredLibraries() {
+    const Config::InjectionSettings settings = Config::GetInjectionSettings();
+    if (!settings.libraryX86.empty()) ResolveLibraryPath(settings.libraryX86);
+    if (!settings.libraryX64.empty() && settings.libraryX64 != settings.libraryX86) {
+        ResolveLibraryPath(settings.libraryX64);
+    }
+}
 
 void Apply(const PipeContext& ctx) {
     const Config::InjectionSettings settings = Config::GetInjectionSettings();
