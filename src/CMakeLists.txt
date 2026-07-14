@@ -156,7 +156,7 @@ if(APPLE)
     target_link_libraries(OpenSteamToolMacOS PRIVATE
         OSTPlatform
         lua_static
-        dobby
+        dobby_static
         tomlplusplus::tomlplusplus
         $<$<CONFIG:Debug>:libprotobuf>
         $<$<CONFIG:Release>:libprotobuf-lite>

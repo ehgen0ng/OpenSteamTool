@@ -57,7 +57,7 @@ elseif(APPLE)
     )
 
     target_link_libraries(OSTPlatform PRIVATE
-        dobby
+        dobby_static
         "-lcurl"                  # Http.cpp uses libcurl (macOS-bundled)
         "-framework CoreServices" # DirectoryWatch.cpp uses FSEvents
     )
