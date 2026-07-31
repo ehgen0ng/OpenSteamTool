@@ -1,7 +1,9 @@
 #include "CloudRedirectHost.h"
 
 #include "OSTPlatform/include/DynamicLibrary.h"
+#if defined(_WIN32)
 #include "OSTPlatform/include/Encoding.h"
+#endif
 #include "Utils/Config/Config.h"
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Config/RuntimePaths.h"
@@ -14,6 +16,22 @@
 
 namespace CloudRedirectHost {
 namespace {
+
+#if defined(_WIN32)
+    constexpr auto kDefaultLibraryName = L"cloud_redirect.dll";
+
+    std::filesystem::path PathFromUtf8(const std::string& value) {
+        return std::filesystem::path(OSTPlatform::Encoding::Utf8ToWide(value));
+    }
+#elif defined(__APPLE__)
+    constexpr auto kDefaultLibraryName = "cloud_redirect.dylib";
+
+    std::filesystem::path PathFromUtf8(const std::string& value) {
+        return std::filesystem::path(value);
+    }
+#else
+#error "CloudRedirectHost supports only Windows and macOS"
+#endif
 
     // --- CloudRedirect third-party client ABI (CloudRedirect/src/common/cr_api.h)
     // Declared locally so OpenSteamTool does not need CloudRedirect's headers.
@@ -65,18 +83,16 @@ namespace {
 
     std::filesystem::path ResolveLibraryPath(const std::string& steamRoot,
                                              const std::string& configured) {
-        const std::filesystem::path legacyRoot(
-            OSTPlatform::Encoding::Utf8ToWide(steamRoot));
+        const std::filesystem::path legacyRoot = PathFromUtf8(steamRoot);
         std::filesystem::path library;
         std::filesystem::path current;
         if (configured.empty()) {
-            library = L"cloud_redirect.dll";
+            library = kDefaultLibraryName;
             if (!RuntimePaths::PluginDirectory().empty()) {
                 current = RuntimePaths::PluginDirectory() / library;
             }
         } else {
-            library = std::filesystem::path(
-                OSTPlatform::Encoding::Utf8ToWide(configured));
+            library = PathFromUtf8(configured);
             if (library.is_absolute()) return library;
             if (!RuntimePaths::DataRoot().empty()) {
                 current = RuntimePaths::DataRoot() / library;
@@ -100,7 +116,7 @@ namespace {
                        const char* name, T& out) {
         out = reinterpret_cast<T>(OSTPlatform::DynamicLibrary::GetSymbol(module, name));
         if (!out) {
-            LOG_WARN("CloudRedirect: export {} not found in cloud_redirect.dll", name);
+            LOG_WARN("CloudRedirect: export {} not found", name);
             return false;
         }
         return true;
@@ -127,7 +143,7 @@ void Initialize(const char* steamInstallPath) {
     if (g_active.load(std::memory_order_acquire)) return;
 
     if (!std::filesystem::exists(libPath)) {
-        LOG_WARN("CloudRedirect: cloud_redirect.dll not found at {}", libPath.string());
+        LOG_WARN("CloudRedirect: library not found at {}", libPath.string());
         return;
     }
 
@@ -145,7 +161,7 @@ void Initialize(const char* steamInstallPath) {
     ok &= ResolveSymbol(g_module, "CR_IsApp",          g_isApp);
     ok &= ResolveSymbol(g_module, "CR_Shutdown",       g_shutdownFn);
     if (!ok) {
-        LOG_WARN("CloudRedirect: cloud_redirect.dll is missing required exports, disabling");
+        LOG_WARN("CloudRedirect: library is missing required exports, disabling");
         g_module = nullptr;
         return;
     }
@@ -243,5 +259,17 @@ void Shutdown() {
     if (g_shutdownFn) g_shutdownFn();
     LOG_INFO("CloudRedirect: shut down");
 }
+
+#if defined(__APPLE__)
+namespace {
+
+struct ExitGuard final {
+    ~ExitGuard() { Shutdown(); }
+};
+
+ExitGuard g_exitGuard;
+
+} // namespace
+#endif
 
 } // namespace CloudRedirectHost

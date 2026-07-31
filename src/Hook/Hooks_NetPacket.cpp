@@ -950,7 +950,7 @@ namespace Hooks_NetPacket_OnlineFix {
 // ════════════════════════════════════════════════════════════════
 //  Hooks_NetPacket_Cloud
 //
-//  Steam Cloud save redirection via CloudRedirect (cloud_redirect.dll).
+//  Steam Cloud save redirection via CloudRedirect's dynamic library.
 //
 //  Outgoing: ServiceMethodCallFromClient (eMsg 151) with target_job_name
 //            "Cloud.*" for an addappid()-unlocked game.

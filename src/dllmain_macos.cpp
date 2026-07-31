@@ -319,8 +319,7 @@ void ReportImage(const mach_header* header, intptr_t slide) {
             LOG_INFO("SteamUI hooks installed (CoreHook)");
 
             // Optional Steam Cloud save/achievement redirection (CloudRedirect).
-            // No-op unless [cloud].enabled is set (native macOS backend — see
-            // CloudRedirectHost_macos.cpp).
+            // No-op unless [cloud].enabled is set and cloud_redirect.dylib loads.
             CloudRedirectHost::Initialize(SteamRootDir().string().c_str());
 
             ReportRuntimeReady();

@@ -132,8 +132,8 @@ if(APPLE)
         Utils/SteamMetadata/ManifestClient.cpp
         Utils/SteamMetadata/IPCLoader_macos.cpp
 
-        # Excluded-feature stubs and shared pipe subsystem
-        Utils/CloudRedirect/CloudRedirectHost_macos.cpp
+        # CloudRedirect host and shared pipe subsystem
+        Utils/CloudRedirect/CloudRedirectHost.cpp
         Pipe/PipeManager.cpp
         Pipe/ProcessInspector.cpp
         Pipe/Features/Injection/Injection.cpp

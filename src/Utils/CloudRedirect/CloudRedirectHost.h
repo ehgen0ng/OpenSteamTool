@@ -2,14 +2,14 @@
 
 #include <cstdint>
 
-// Hosts CloudRedirect's prebuilt cloud_redirect.dll inside the Steam process and
+// Hosts CloudRedirect's prebuilt dynamic library inside the Steam process and
 // drives its third-party client API (see CloudRedirect/src/common/cr_api.h):
-//   - loads the DLL and resolves the CR_* exports,
+//   - loads cloud_redirect.dll/cloud_redirect.dylib and resolves CR_* exports,
 //   - calls CR_InitCloudSave in cloud-save-only mode,
 //   - registers every addappid() game as a redirected ("namespace") app,
 //   - forwards Cloud.* RPCs from the NetPacket hook to CR_HandleCloudRpc.
 //
-// All entry points are safe no-ops unless [cloud].enabled is set and the DLL
+// All entry points are safe no-ops unless [cloud].enabled is set and the library
 // loaded and initialised successfully.
 namespace CloudRedirectHost {
 
@@ -21,7 +21,7 @@ namespace CloudRedirectHost {
     // hot-reload so the redirected set tracks addappid() changes.
     void SyncAppSet();
 
-    // True once the DLL is loaded and CR_InitCloudSave succeeded.
+    // True once the dynamic library is loaded and CR_InitCloudSave succeeded.
     bool IsActive();
 
     // Whether CloudRedirect is currently redirecting saves for this appid.
@@ -46,7 +46,7 @@ namespace CloudRedirectHost {
     // Returns number of blocks written (0 if none/disabled).
     uint32_t GetAchievements(uint32_t appId, AchievementBlock* out, uint32_t maxBlocks);
 
-    // Teardown. Called from DLL_PROCESS_DETACH.
+    // Teardown. Called from DLL_PROCESS_DETACH or the macOS process-exit guard.
     void Shutdown();
 
 }

@@ -223,6 +223,7 @@ std::error_code EnsureDataDirectories() {
         DataRoot(),
         LogDirectory(),
         LuaDirectory(),
+        PluginDirectory(),
     };
     for (const auto& directory : commonDirectories) {
         std::filesystem::create_directories(directory, ec);
@@ -233,7 +234,6 @@ std::error_code EnsureDataDirectories() {
     const std::array windowsDirectories{
         CacheDirectory(),
         BinaryDirectory(),
-        PluginDirectory(),
     };
     for (const auto& directory : windowsDirectories) {
         std::filesystem::create_directories(directory, ec);
