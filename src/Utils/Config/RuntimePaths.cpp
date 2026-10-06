@@ -271,27 +271,23 @@ TransferResult MoveFileVerified(const std::filesystem::path& source,
         return result;
     }
 
-    if (std::filesystem::is_symlink(source, ec)) {
-        result.outcome = TransferOutcome::Failed;
-        result.error = std::make_error_code(std::errc::operation_not_supported);
-        return result;
-    }
+    const auto sourceStatus = std::filesystem::symlink_status(source, ec);
+    // A missing legacy file is expected; symlink_status may also set ec.
+    if (sourceStatus.type() == std::filesystem::file_type::not_found) return result;
     if (ec) {
         result.outcome = TransferOutcome::Failed;
         result.error = ec;
         return result;
     }
 
-    if (!std::filesystem::exists(source, ec)) {
-        if (ec) {
-            result.outcome = TransferOutcome::Failed;
-            result.error = ec;
-        }
+    if (std::filesystem::is_symlink(sourceStatus)) {
+        result.outcome = TransferOutcome::Failed;
+        result.error = std::make_error_code(std::errc::operation_not_supported);
         return result;
     }
-    if (!std::filesystem::is_regular_file(source, ec) || ec) {
+    if (!std::filesystem::is_regular_file(sourceStatus)) {
         result.outcome = TransferOutcome::Failed;
-        result.error = ec ? ec : std::make_error_code(std::errc::invalid_argument);
+        result.error = std::make_error_code(std::errc::invalid_argument);
         return result;
     }
 
