@@ -1,4 +1,5 @@
 #include "PatternLoader.h"
+#include "NetPacketLayout.h"
 #include "OSTPlatform/include/Memory.h"
 #include "OSTPlatform/include/Numbers.h"
 #include "Utils/Logging/Log.h"
@@ -190,6 +191,11 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module, const std::string& d
         std::string parseErr;
         PatternMap map = ParsePatternString(r.body, &parseErr);
         if (!map.empty()) {
+            if (component == "steamclient") {
+                const auto packetLayout = SteamMetadata::SelectNetPacketLayout(r.sha256);
+                CNetPacket::SetPayloadLayout(packetLayout);
+                LOG_INFO("PatternLoader: net packet layout {}", static_cast<int>(packetLayout));
+            }
             LOG_INFO("PatternLoader: loaded {} patterns for {} ({})",
                      map.size(), component, r.fromCache ? "cache fallback" : "remote");
             g_moduleMaps[module] = std::move(map);

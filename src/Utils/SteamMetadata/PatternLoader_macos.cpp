@@ -8,6 +8,7 @@
 #include "include/Hash.h"
 #include "include/Numbers.h"
 #include "SteamMonitorData.gen.h"
+#include "NetPacketLayout.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
 #include "Utils/Support/FnvHash.h"
@@ -374,6 +375,11 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module,
         return false;
     }
 
+    if (component == "steamclient") {
+        const auto packetLayout = SteamMetadata::SelectNetPacketLayout(it->second.sha256);
+        CNetPacket::SetPayloadLayout(packetLayout);
+        LOG_INFO("PatternLoader: net packet layout {}", static_cast<int>(packetLayout));
+    }
     it->second.metadataLoaded = true;
     LOG_INFO("PatternLoader: loaded {} embedded signatures for {} ({})",
              it->second.manualSignatures.size(), component, it->second.sha256);

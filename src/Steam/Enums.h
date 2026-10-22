@@ -228,7 +228,8 @@ enum EResult
 	k_EResultOfflineAppCacheInvalid = 130,		// The local data for the offline mode cache is insufficient to login
 };
 
-enum EMsg {
+// Wire message IDs are 32-bit and may include IDs not named in this snapshot.
+enum EMsg : uint32 {
 	k_EMsgInvalid = 0,
 	k_EMsgMulti = 1,
 	k_EMsgProtobufWrapped = 2,

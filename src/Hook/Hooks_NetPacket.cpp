@@ -55,31 +55,7 @@ namespace {
 
 
     // ── Packet layout ──────────────────────────────────────────
-    inline bool UnpackRaw(const uint8* data, uint32 size,
-                          EMsg& eMsg, const uint8*& pHdr, uint32& cbHdr,
-                          const uint8*& pBody, uint32& cbBody)
-    {
-        if (!data || size < sizeof(MsgHdr)) {
-        fail:
-            eMsg = static_cast<EMsg>(0);
-            cbHdr = 0;
-            pHdr = nullptr;
-            pBody = nullptr;
-            cbBody = 0;
-            return false;
-        }
-        const MsgHdr* hdr = reinterpret_cast<const MsgHdr*>(data);
-        if (!(hdr->eMsg & kMsgHdrProtoFlag)) goto fail;
-
-        eMsg  = static_cast<EMsg>(hdr->eMsg & ~kMsgHdrProtoFlag);
-        cbHdr = hdr->headerLength;
-        uint32 off = sizeof(MsgHdr) + cbHdr;
-        if (off > size) goto fail;
-        pHdr   = data + sizeof(MsgHdr);
-        pBody  = data + off;
-        cbBody = size - off;
-        return true;
-    }
+    using NetPacket::UnpackRaw;
 
     // ── Incoming: replace header and/or body (ring-buffer pool) ──
     inline void ReplaceRecvPacket(CNetPacket* p,
@@ -90,15 +66,15 @@ namespace {
         if (newSize > sizeof(g_RecvPacketPool[0])) return;
 
         uint8* buf = g_RecvPacketPool[g_RecvPacketPoolIdx];
-        const MsgHdr* orig = reinterpret_cast<const MsgHdr*>(p->m_pubData);
+        const MsgHdr* orig = reinterpret_cast<const MsgHdr*>(p->Data());
         MsgHdr* out = reinterpret_cast<MsgHdr*>(buf);
         out->eMsg         = orig->eMsg;
         out->headerLength = cbNewHdr;
         memcpy(buf + sizeof(MsgHdr), pNewHdr, cbNewHdr);
         if (cbNewBody)
             memcpy(buf + sizeof(MsgHdr) + cbNewHdr, pNewBody, cbNewBody);
-        p->m_pubData = buf;
-        p->m_cubData = newSize;
+        p->Data() = buf;
+        p->DataSize() = newSize;
 
         g_RecvPacketPoolIdx = (g_RecvPacketPoolIdx + 1) % kPacketPoolSize;
     }
@@ -732,8 +708,7 @@ namespace Hooks_NetPacket_RichPresence {
         }
 
         auto* mhdr = reinterpret_cast<MsgHdr*>(g_InjectPkt);
-        mhdr->eMsg = static_cast<EMsg>(
-            static_cast<uint32>(k_EMsgClientPersonaState) | kMsgHdrProtoFlag);
+        mhdr->eMsg = static_cast<uint32>(k_EMsgClientPersonaState) | kMsgHdrProtoFlag;
         mhdr->headerLength = hdrSize;
         memcpy(g_InjectPkt + sizeof(MsgHdr), g_SelfHdr, hdrSize);
         if (!msg.SerializeToArray(g_InjectPkt + sizeof(MsgHdr) + hdrSize, bodySize))
@@ -871,13 +846,13 @@ namespace Hooks_NetPacket_RichPresence {
         if (!g_InjectPending || g_cbInjectPkt == 0) return;
         g_InjectPending = false;
 
-        uint8* origData = pCarrier->m_pubData;
-        uint32 origSize = pCarrier->m_cubData;
-        pCarrier->m_pubData = g_InjectPkt;
-        pCarrier->m_cubData = g_cbInjectPkt;
+        uint8* origData = pCarrier->Data();
+        uint32 origSize = pCarrier->DataSize();
+        pCarrier->Data() = g_InjectPkt;
+        pCarrier->DataSize() = g_cbInjectPkt;
         invokeOriginal(pThis, pCarrier);
-        pCarrier->m_pubData = origData;
-        pCarrier->m_cubData = origSize;
+        pCarrier->Data() = origData;
+        pCarrier->DataSize() = origSize;
         LOG_RICHPRESENCE_INFO("Delivered manufactured self-PersonaState ({} bytes)", g_cbInjectPkt);
     }
 
@@ -1071,8 +1046,7 @@ namespace Hooks_NetPacket_Cloud {
 
         std::vector<uint8> pkt(total);
         auto* mhdr = reinterpret_cast<MsgHdr*>(pkt.data());
-        mhdr->eMsg = static_cast<EMsg>(
-            static_cast<uint32>(k_EMsgServiceMethodResponse) | kMsgHdrProtoFlag);
+        mhdr->eMsg = static_cast<uint32>(k_EMsgServiceMethodResponse) | kMsgHdrProtoFlag;
         mhdr->headerLength = cbRespHdr;
         if (!respHdr.SerializeToArray(pkt.data() + sizeof(MsgHdr), cbRespHdr))
             return false;
@@ -1104,13 +1078,13 @@ namespace Hooks_NetPacket_Cloud {
                 g_pending.pop_front();
             }
 
-            uint8* origData = pCarrier->m_pubData;
-            uint32 origSize = pCarrier->m_cubData;
-            pCarrier->m_pubData = pkt.data();
-            pCarrier->m_cubData = static_cast<uint32>(pkt.size());
+            uint8* origData = pCarrier->Data();
+            uint32 origSize = pCarrier->DataSize();
+            pCarrier->Data() = pkt.data();
+            pCarrier->DataSize() = static_cast<uint32>(pkt.size());
             invokeOriginal(pThis, pCarrier);
-            pCarrier->m_pubData = origData;
-            pCarrier->m_cubData = origSize;
+            pCarrier->Data() = origData;
+            pCarrier->DataSize() = origSize;
             LOG_NETPACKET_DEBUG("Cloud: delivered {}-byte response", pkt.size());
         }
     }
@@ -1318,6 +1292,10 @@ namespace {
 
     HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
     {
+        // Do not dereference invalid carriers or mutate/inject into short packets.
+        // Forward unchanged; the original Steam function owns their handling.
+        if (!NetPacket::HasPlausiblePayload(pPacket)) return oRecvPkt(pThis, pPacket);
+
         Hooks_NetPacket_RichPresence::TryInject(
             pThis, pPacket,
             [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
@@ -1329,7 +1307,7 @@ namespace {
         EMsg eMsg;
         const uint8 *pBody, *pHdr;
         uint32 cbBody, cbHdr;
-        if (UnpackRaw(pPacket->m_pubData, pPacket->m_cubData,
+        if (UnpackRaw(pPacket->Data(), pPacket->DataSize(),
                      eMsg, pHdr, cbHdr, pBody, cbBody)) {
             g_ResizedInPlace = false;
             RecvJob(eMsg, pBody, cbBody, pHdr, cbHdr);
@@ -1340,7 +1318,7 @@ namespace {
                     g_NewHdr, g_cbNewHdr,
                     pBody, g_NewBodySize);
             } else if (g_ResizedInPlace) {
-                pPacket->m_cubData = sizeof(MsgHdr) + cbHdr + g_NewBodySize;
+                pPacket->DataSize() = sizeof(MsgHdr) + cbHdr + g_NewBodySize;
             } else if (g_NeedReplaceHdr || g_NeedReplaceBody) {
                 ReplaceRecvPacket(pPacket,
                     g_NeedReplaceHdr  ? g_NewHdr  : pHdr,

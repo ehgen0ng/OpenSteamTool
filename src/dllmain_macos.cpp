@@ -7,6 +7,7 @@
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Config/LuaFileWatcher.h"
 #include "Utils/Config/RuntimePaths.h"
+#include "Utils/Config/InjectionEnvironment_macos.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
 #include "Utils/SteamMetadata/IPCLoader.h"
 #include "Utils/SteamMetadata/PatternLoader.h"
@@ -14,6 +15,7 @@
 
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
+#include <dlfcn.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -191,6 +193,14 @@ std::string g_steamUiPath;
 std::once_flag g_globalInitOnce;
 
 void RunGlobalInit(const SteamImageInfo& steamClient) {
+    // The real client is now loaded. Keep the current image resident but do
+    // not force games/helpers to load it (sandbox/architecture may differ).
+    Dl_info ownImage{};
+    const bool cleanedInjectionEnvironment =
+        ::dladdr(&g_started, &ownImage) != 0 &&
+        ownImage.dli_fname &&
+        MacOSInjection::RemoveOwnLibraryFromEnvironment(ownImage.dli_fname);
+
     // Mirrors Windows dllmain.cpp's InitThread order: Log::Init (needs only
     // our own module handle, picks the log directory) before Config::Load,
     // Log::InitModules (needs Config for the log dir/level) right after.
@@ -202,6 +212,11 @@ void RunGlobalInit(const SteamImageInfo& steamClient) {
     const auto migration = RuntimePaths::MigrateLegacyUserFiles(steamRoot);
 
     Log::Init(OSTPlatform::DynamicLibrary::GetLoaded("libOpenSteamTool.dylib"));
+    if (cleanedInjectionEnvironment) {
+        LOG_INFO("Removed OpenSteamTool from child-process injection environment");
+    } else {
+        LOG_WARN("Could not remove OpenSteamTool from child-process injection environment");
+    }
     for (const auto& file : migration.files) {
         if (file.outcome == RuntimePaths::TransferOutcome::Conflict ||
             file.outcome == RuntimePaths::TransferOutcome::Failed) {

@@ -6,7 +6,7 @@
 
 #include "Types.h"
 #include "Enums.h"
-
+#include "NetPacket.h"
 
 #include <string>
 #include <format>
@@ -205,25 +205,6 @@ struct IKeyValuesSystem {
 	const char* GetKeyName(int symbol)       { return GetStringForSymbol(symbol); }
 };
 using KeyValuesSystemSteam_t = IKeyValuesSystem* (*)();
-
-struct CNetPacket
-{
-	HCONNECTION m_hConnection;
-	uint8* m_pubData;
-	uint32 m_cubData;
-	int32 m_cRef;
-	uint8* m_pubNetworkBuffer;
-	CNetPacket* m_pNext;
-};
-
-struct MsgHdr
-{
-	EMsg eMsg;               // actual_eMsg | 0x80000000
-	uint32 headerLength;
-};
-
-// High bit of eMsg discriminates protobuf vs extended header.
-constexpr uint32 kMsgHdrProtoFlag = 0x80000000;
 
 #pragma pack(push,1)
 struct ExtendedMsgHdr
