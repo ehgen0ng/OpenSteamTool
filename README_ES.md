@@ -188,9 +188,9 @@ El entorno de ejecución (runtime) en C++ proporciona dos funciones auxiliares d
 
 ### Compatibilidad con versiones de Steam
 
-OpenSteamTool ya no incluye firmas de patrones de bytes (byte-pattern signatures) dentro de la DLL. En su lugar, en cada inicio calcula el hash SHA-256 de `steamclient64.dll` y `steamui.dll` en el disco, y busca un archivo de patrones coincidente desde el rastreador ascendente en ['OpenSteam001/steam-monitor'](https://github.com/OpenSteam001/steam-monitor) (extension `pattern`).
+En cada inicio, OpenSteamTool calcula el SHA-256 de `steamclient64.dll` y `steamui.dll` en el disco y busca primero un archivo de patrones coincidente integrado en la DLL. Si no hay datos integrados utilizables, consulta las fuentes remotas y finalmente recurre a la caché local.
 
-En Windows, cada inicio consulta cinco fuentes integradas en paralelo (para los canales `pattern` e `ipc`):
+En Windows, cuando los datos integrados no están disponibles, se consultan estas cinco fuentes remotas en paralelo (para los canales `pattern` e `ipc`):
 
 1. **GitHub raw oficial** — `OpenSteam001/steam-monitor`.
 2. **CDN jsDelivr oficial** — el mismo repositorio mediante CDN.
@@ -198,19 +198,19 @@ En Windows, cada inicio consulta cinco fuentes integradas en paralelo (para los 
 4. **CDN jsDelivr comunitario** — el repositorio comunitario mediante CDN.
 5. **LuaTools** — `https://git.lua.tools/luatools/steam-monitor`.
 
-Sin una fuente personalizada, se utiliza la primera respuesta HTTP 200 que supere las comprobaciones básicas: debe ser TOML válido con una tabla con nombre no vacía. Los cargadores de patrones e IPC siguen validando sus campos específicos. Solo si fallan todas las fuentes remotas se utiliza la caché del mismo SHA: `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml` (`ipc` para metadatos IPC). Solo el resultado seleccionado actualiza la caché; las respuestas tardías no la sobrescriben.
+Por defecto, se utilizan los datos válidos de la primera fuente que responda correctamente y se actualiza la caché local. Si ninguna fuente remota está disponible, se utiliza la caché correspondiente al SHA-256 actual: `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml` (`ipc` para metadatos IPC).
 
-Se consulta al servidor remoto en cada inicio para que los usuarios obtengan automáticamente las nuevas publicaciones del proyecto principal (por ejemplo, si el bot añade una nueva firma o corrige una existente) sin tener que limpiar ninguna caché.
+Los datos integrados se actualizan con el programa. Cuando se necesitan fuentes remotas, cada inicio sigue obteniendo los datos más recientes sin tener que limpiar la caché manualmente.
 
 Un **HTTP 404**, un error de red o un TOML inválido de una fuente no impide que las otras funcionen. Si todas las fuentes remotas y la caché del mismo SHA fallan, aparece una ventana emergente con el nombre de la DLL, su SHA-256, la ruta de caché esperada y la URL de origen. Solo se desactivan los hooks vinculados a esa DLL; el resto de OpenSteamTool sigue funcionando.
 
-También puedes colocar manualmente un archivo TOML de patrones en el directorio de la caché si conoces la estructura para una compilación determinada; el nombre del archivo debe ser `<sha256>.toml`. La caché de reserva lo detectará la próxima vez que el servidor remoto sea inaccesible.
+También puedes colocar manualmente un TOML de patrones en la caché si conoces la estructura de una compilación; debe llamarse `<sha256>.toml`. La caché de reserva lo utilizará cuando no haya datos integrados disponibles y fallen todas las fuentes remotas.
 
-> Cada consulta de metadatos realiza hasta cinco solicitudes HTTPS paralelas, más una fuente personalizada distinta. Se conservan los tiempos de espera HTTP: en Windows, 5/5/10/10 segundos para resolución/conexión/envío/recepción, sin un nuevo límite global. Tras seleccionar un resultado, las solicitudes más lentas terminan en segundo plano con sus tiempos de espera originales. Esta sección describe Windows; los metadatos integrados de macOS no cambian.
+> Solo se realizan solicitudes HTTPS cuando los datos integrados no están disponibles. macOS actualmente utiliza únicamente datos integrados.
 
 #### Uso de un espejo (mirror) diferente
 
-Para dar prioridad a un espejo privado o servidor de intranet, configura una plantilla de URL completa. La fuente personalizada se consulta en paralelo y **no reemplaza ni desactiva las fuentes integradas**. Su respuesta exitosa tiene prioridad: aunque una alternativa responda antes, se espera hasta que la fuente personalizada falle o alcance su tiempo de espera HTTP original. Entonces se utiliza la primera alternativa exitosa. Las URL expandidas idénticas se consultan una sola vez. Una plantilla inválida se ignora sin desactivar las fuentes integradas.
+Para utilizar un espejo privado o servidor de intranet, configura una plantilla de URL completa. Durante la búsqueda remota, la fuente personalizada se consulta junto con las predeterminadas, pero tiene prioridad. Solo si falla o agota su tiempo de espera se utiliza la primera alternativa que responda correctamente.
 
 La plantilla debe incluir obligatoriamente `{channel}`, `{component}` y `{sha256}`. Los canales utilizados actualmente son `pattern` e `ipc`.
 

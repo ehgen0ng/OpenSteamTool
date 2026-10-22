@@ -1,6 +1,6 @@
 # Embed root-level steam-monitor TOML files into a generated C++ header.
 # Source metadata remains outside src/; the generated header exists only in
-# the build tree and is compiled into the macOS dylib.
+# the build tree and is compiled into the Windows DLL and macOS dylib.
 
 function(opensteamtool_embed_steam_monitor_data out_var)
     set(one_value_args ROOT OUTPUT_DIR)
@@ -59,8 +59,8 @@ function(opensteamtool_embed_steam_monitor_data out_var)
     if(_entry_count EQUAL 0)
         message(WARNING
             "No steam-monitor TOML files found under '${_root}'. "
-            "Building with empty embedded metadata; affected hooks will be "
-            "disabled by the existing runtime warning paths.")
+            "Building with empty embedded metadata; runtime loaders will use "
+            "their existing fallback or warning paths.")
     endif()
 
     file(MAKE_DIRECTORY "${STEAM_MONITOR_OUTPUT_DIR}")

@@ -14,9 +14,11 @@ namespace RemoteToml {
         bool        fromCache = false;
         std::string body;
         std::string sha256;
+        bool        fromEmbedded = false;
     };
 
-    // Race remote sources (custom URL preferred), then try the exact SHA cache.
+    // Exact-SHA embedded metadata first, then concurrent remote sources
+    // (custom URL preferred), then the exact SHA cache.
     Result Fetch(const Request& request);
 
 } // namespace RemoteToml

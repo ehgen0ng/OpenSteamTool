@@ -1,4 +1,5 @@
 #include "RemoteToml.h"
+#include "SteamMonitorData.gen.h"
 #include "OSTPlatform/include/Http.h"
 #include "OSTPlatform/include/Thread.h"
 #include "Utils/Config/Config.h"
@@ -205,7 +206,23 @@ Result Fetch(const Request& request)
     LOG_INFO("RemoteToml({}/{}): sha256 = {} ({} ms)",
              request.channel, request.component, out.sha256, hashMs);
 
-    // 2. Cache path & dir.
+    // 2. Share the same embedded metadata and exact-SHA lookup as macOS.
+    // A hit does not start HTTP requests or read / write the disk cache.
+    if (const auto* embedded = SteamMonitorData::Find(
+            request.channel, request.component, out.sha256)) {
+        if (IsMetadataToml(embedded->body)) {
+            out.body = embedded->body;
+            out.ok = true;
+            out.fromEmbedded = true;
+            LOG_INFO("RemoteToml({}/{}): using embedded metadata for {}",
+                     request.channel, request.component, out.sha256);
+            return out;
+        }
+        LOG_WARN("RemoteToml({}/{}): embedded TOML invalid for {}; trying remote sources",
+                 request.channel, request.component, out.sha256);
+    }
+
+    // 3. Cache path & dir.
     fs::path cacheDir = RuntimePaths::CacheDirectory();
     if (!cacheDir.empty()) cacheDir /= fs::path(request.channel) / request.component;
     fs::path cachePath = cacheDir.empty()
@@ -220,14 +237,14 @@ Result Fetch(const Request& request)
                  request.channel, request.component, cacheDir.string(), mkdirEc.message());
     }
 
-    // 3. Race all distinct sources; a configured source keeps priority until
+    // 4. Race all distinct sources; a configured source keeps priority until
     // it fails / reaches the existing HTTP timeout. Workers never write the cache.
     const auto sources = BuildSources(request, out.sha256);
     LOG_INFO("RemoteToml({}/{}): requesting {} sources concurrently",
              request.channel, request.component, sources.size());
     std::string body = FetchSources(sources);
 
-    // 4. Remote OK → write cache, return body.
+    // 5. Remote OK → write cache, return body.
     if (!body.empty()) {
         std::ofstream ofs;
         if (!cachePath.empty()) ofs.open(cachePath, std::ios::binary);
@@ -244,7 +261,7 @@ Result Fetch(const Request& request)
         return out;
     }
 
-    // 5. Remote failed → fall back to whatever is cached for this exact SHA.
+    // 6. Remote failed → fall back to whatever is cached for this exact SHA.
     if (!cachePath.empty() && fs::exists(cachePath)) {
         LOG_WARN("RemoteToml({}/{}): remote sources failed or timed out; "
                  "falling back to local cache {}",
@@ -269,7 +286,7 @@ Result Fetch(const Request& request)
         }
     }
 
-    // 6. Total failure — caller handles popup / degraded mode.
+    // 7. Total failure — caller handles popup / degraded mode.
     LOG_WARN("RemoteToml({}/{}): no source available",
              request.channel, request.component);
     return out;

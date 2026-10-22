@@ -103,13 +103,9 @@ enabled = false
 # library = "plugins/cloud_redirect.dylib" # macOS
 
 [remote]
-# Optional preferred metadata source (Windows remote loading).
-# Five built-in sources are always requested concurrently: official GitHub/CDN,
-# community GitHub/CDN, and LuaTools. A custom source runs alongside them and
-# takes priority until it fails or reaches the existing HTTP timeout.
-# Then the first successful backup is used; all failures fall back to SHA cache.
-# Duplicate URLs are requested once. No HTTP timeout settings are changed.
-# Must include {channel}, {component}, and {sha256}; invalid templates are ignored.
+# Optional preferred mirror for Windows when embedded metadata is unavailable.
+# Default sources are still queried; a backup is used if this mirror fails or times out.
+# Must include all three placeholders: {channel}, {component}, and {sha256}.
 #
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
 # url_template = "https://fast.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml"

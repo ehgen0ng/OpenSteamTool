@@ -180,7 +180,7 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module, const std::string& d
 {
     namespace fs = std::filesystem;
 
-    // Delegate fetch + cache + mirror fallback to RemoteToml.
+    // Delegate embedded lookup + remote / cache fallback to RemoteToml.
     RemoteToml::Result r = RemoteToml::Fetch({
         kPatternChannel,
         component,
@@ -197,7 +197,8 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module, const std::string& d
                 LOG_INFO("PatternLoader: net packet layout {}", static_cast<int>(packetLayout));
             }
             LOG_INFO("PatternLoader: loaded {} patterns for {} ({})",
-                     map.size(), component, r.fromCache ? "cache fallback" : "remote");
+                     map.size(), component, r.fromEmbedded ? "embedded" :
+                         (r.fromCache ? "cache fallback" : "remote"));
             g_moduleMaps[module] = std::move(map);
             return true;
         }

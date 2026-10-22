@@ -19,6 +19,14 @@ set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+if(WIN32 OR APPLE)
+    include(SteamMonitorData)
+    opensteamtool_embed_steam_monitor_data(STEAM_MONITOR_DATA_HEADER
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../steam-monitor"
+        OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    )
+endif()
 
 if(APPLE)
     # Dobby's debug mode is a configure-time option, so one Dobby target cannot
@@ -43,15 +51,6 @@ if(APPLE)
     message(STATUS "OpenSteamTool macOS configuration: ${CMAKE_BUILD_TYPE}")
 
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
-
-    # Make shared dependency recipes available before adding OSTPlatform.
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-    include(SteamMonitorData)
-    opensteamtool_embed_steam_monitor_data(STEAM_MONITOR_DATA_HEADER
-        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../steam-monitor"
-        OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated"
-    )
 
     # Log.h includes this generated header in both Debug and Release.
     include(LogMacros)
@@ -213,7 +212,6 @@ configure_file(
 # ---------------------------------------------------------------------------
 # Dependency recipes (FetchContent-backed, cached at <repo>/.deps).
 # ---------------------------------------------------------------------------
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(OPENSTEAMTOOL_TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools")
 include(Lua)
 include(Spdlog)
@@ -295,6 +293,7 @@ add_library(OpenSteamTool SHARED
     Utils/SteamMetadata/RemoteToml.cpp
     Utils/SteamMetadata/StatsClient.cpp
     Utils/SteamMetadata/SteamDiagnostics.cpp
+    "${STEAM_MONITOR_DATA_HEADER}"
 
     # Pipe subsystem: generic handshake registry + ProcessInspector core, plus
     # self-contained features that own their primitives.
