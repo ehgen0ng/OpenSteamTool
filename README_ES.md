@@ -190,23 +190,27 @@ El entorno de ejecución (runtime) en C++ proporciona dos funciones auxiliares d
 
 OpenSteamTool ya no incluye firmas de patrones de bytes (byte-pattern signatures) dentro de la DLL. En su lugar, en cada inicio calcula el hash SHA-256 de `steamclient64.dll` y `steamui.dll` en el disco, y busca un archivo de patrones coincidente desde el rastreador ascendente en ['OpenSteam001/steam-monitor'](https://github.com/OpenSteam001/steam-monitor) (extension `pattern`).
 
-Orden de búsqueda (en cada inicio):
+En Windows, cada inicio consulta cinco fuentes integradas en paralelo (para los canales `pattern` e `ipc`):
 
-1.**GitHub raw** — `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/....` Fuente canónica.
-2.**jsDelivr CDN** — alternativa automática si GitHub raw no está disponible (conexión rechazada / tiempo de espera / error 5xx). No requiere configuración. Útil en regiones donde `raw.githubusercontent.com` está bloqueado pero jsDelivr es accesible (por ejemplo, China continental).
-3.**Caché local** — `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`. Se utiliza **únicamente** cuando el servidor remoto no está disponible. La caché se sobrescribe tras cada consulta remota exitosa.
+1. **GitHub raw oficial** — `OpenSteam001/steam-monitor`.
+2. **CDN jsDelivr oficial** — el mismo repositorio mediante CDN.
+3. **GitHub raw comunitario** — `madoiscool/steam-monitor`.
+4. **CDN jsDelivr comunitario** — el repositorio comunitario mediante CDN.
+5. **LuaTools** — `https://git.lua.tools/luatools/steam-monitor`.
+
+Sin una fuente personalizada, se utiliza la primera respuesta HTTP 200 que supere las comprobaciones básicas: debe ser TOML válido con una tabla con nombre no vacía. Los cargadores de patrones e IPC siguen validando sus campos específicos. Solo si fallan todas las fuentes remotas se utiliza la caché del mismo SHA: `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml` (`ipc` para metadatos IPC). Solo el resultado seleccionado actualiza la caché; las respuestas tardías no la sobrescriben.
 
 Se consulta al servidor remoto en cada inicio para que los usuarios obtengan automáticamente las nuevas publicaciones del proyecto principal (por ejemplo, si el bot añade una nueva firma o corrige una existente) sin tener que limpiar ninguna caché.
 
-Si un paso devuelve un error **HTTP 404**, el bucle de espejos (mirrors) se detiene inmediatamente —todos los espejos sirven el mismo contenido, por lo que un 404 significa que el bot ascendente aún no ha publicado un archivo TOML para esa compilación específica de Steam—. En ese caso, el código recurre a la caché local si existe; de lo contrario, aparecerá una ventana emergente por única vez mostrando el nombre de la DLL no emparejada, su SHA-256, la ruta de caché esperada y la URL de origen. Solo se desactivarán los ganchos (hooks) vinculados a esa DLL; el resto de OpenSteamTool seguirá funcionando.
+Un **HTTP 404**, un error de red o un TOML inválido de una fuente no impide que las otras funcionen. Si todas las fuentes remotas y la caché del mismo SHA fallan, aparece una ventana emergente con el nombre de la DLL, su SHA-256, la ruta de caché esperada y la URL de origen. Solo se desactivan los hooks vinculados a esa DLL; el resto de OpenSteamTool sigue funcionando.
 
 También puedes colocar manualmente un archivo TOML de patrones en el directorio de la caché si conoces la estructura para una compilación determinada; el nombre del archivo debe ser `<sha256>.toml`. La caché de reserva lo detectará la próxima vez que el servidor remoto sea inaccesible.
 
-> Se realiza una breve solicitud HTTPS saliente en cada inicio (una por cada DLL: `steamclient64.dll`, `steamui.dll`). Los cuerpos descargados son diminutos (~10 KB cada uno) y el proceso se ejecuta en un hilo secundario (worker thread), por lo que nunca bloquea el cargador de Steam.
+> Cada consulta de metadatos realiza hasta cinco solicitudes HTTPS paralelas, más una fuente personalizada distinta. Se conservan los tiempos de espera HTTP: en Windows, 5/5/10/10 segundos para resolución/conexión/envío/recepción, sin un nuevo límite global. Tras seleccionar un resultado, las solicitudes más lentas terminan en segundo plano con sus tiempos de espera originales. Esta sección describe Windows; los metadatos integrados de macOS no cambian.
 
 #### Uso de un espejo (mirror) diferente
 
-Para la mayoría de los usuarios, la alternativa integrada de **GitHub -> jsDelivr** es suficiente. Si deseas utilizar un espejo privado o un servidor de intranet, configura una plantilla de URL completa. Un espejo personalizado reemplazará las fuentes remotas integradas; la alternativa de la caché local seguirá estando disponible.
+Para dar prioridad a un espejo privado o servidor de intranet, configura una plantilla de URL completa. La fuente personalizada se consulta en paralelo y **no reemplaza ni desactiva las fuentes integradas**. Su respuesta exitosa tiene prioridad: aunque una alternativa responda antes, se espera hasta que la fuente personalizada falle o alcance su tiempo de espera HTTP original. Entonces se utiliza la primera alternativa exitosa. Las URL expandidas idénticas se consultan una sola vez. Una plantilla inválida se ignora sin desactivar las fuentes integradas.
 
 La plantilla debe incluir obligatoriamente `{channel}`, `{component}` y `{sha256}`. Los canales utilizados actualmente son `pattern` e `ipc`.
 

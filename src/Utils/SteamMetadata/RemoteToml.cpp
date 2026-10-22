@@ -1,25 +1,69 @@
 #include "RemoteToml.h"
 #include "OSTPlatform/include/Http.h"
+#include "OSTPlatform/include/Thread.h"
 #include "Utils/Config/Config.h"
 #include "Utils/Config/RuntimePaths.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
 
+#include <toml++/toml.hpp>
+
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string_view>
 #include <vector>
 
 namespace RemoteToml {
 
 namespace {
-    constexpr const char* kGithubTemplate =
+    constexpr const char* kDefaultTemplates[] = {
         "https://raw.githubusercontent.com/OpenSteam001/steam-monitor/"
-        "{channel}/{component}/{sha256}.toml";
-    constexpr const char* kJsdelivrTemplate =
+        "{channel}/{component}/{sha256}.toml",
         "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@"
-        "{channel}/{component}/{sha256}.toml";
+        "{channel}/{component}/{sha256}.toml",
+        "https://raw.githubusercontent.com/madoiscool/steam-monitor/"
+        "{channel}/{component}/{sha256}.toml",
+        "https://cdn.jsdelivr.net/gh/madoiscool/steam-monitor@"
+        "{channel}/{component}/{sha256}.toml",
+        "https://git.lua.tools/luatools/steam-monitor/raw/branch/"
+        "{channel}/{component}/{sha256}.toml",
+    };
+
+    struct Source {
+        std::string url;
+        bool preferred;
+    };
+
+    struct PendingFetch {
+        std::mutex mutex;
+        std::condition_variable ready;
+        size_t remaining = 0;
+        bool preferredPending = false;
+        bool closed = false;
+        std::string preferredBody;
+        std::string firstFallbackBody;
+
+        void Complete(bool preferred, std::string body)
+        {
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                if (closed) return;
+                --remaining;
+                if (preferred) {
+                    preferredPending = false;
+                    preferredBody = std::move(body);
+                } else if (firstFallbackBody.empty() && !body.empty()) {
+                    firstFallbackBody = std::move(body);
+                }
+            }
+            ready.notify_one();
+        }
+    };
 
     static bool HasPlaceholder(std::string_view text, std::string_view placeholder)
     {
@@ -54,19 +98,91 @@ namespace {
         return urlTemplate;
     }
 
-    static std::vector<std::string> BuildUrlTemplates()
+    static std::vector<Source> BuildSources(const Request& request,
+                                          std::string_view sha256)
     {
+        std::vector<Source> sources;
+        const auto append = [&](const std::string& urlTemplate, bool preferred) {
+            std::string url = ExpandTemplate(urlTemplate, request, sha256);
+            if (std::none_of(sources.begin(), sources.end(), [&](const Source& source) {
+                    return source.url == url;
+                })) {
+                sources.push_back({ std::move(url), preferred });
+            }
+        };
         const std::string remoteUrlTemplate = Config::GetRemoteUrlTemplate();
-        if (remoteUrlTemplate.empty())
-            return { kGithubTemplate, kJsdelivrTemplate };
+        if (!remoteUrlTemplate.empty()) {
+            if (IsValidTemplate(remoteUrlTemplate)) {
+                append(remoteUrlTemplate, true);
+            } else {
+                LOG_WARN("RemoteToml: remote.url_template must contain "
+                         "{channel}, {component}, and {sha256}; ignoring custom source");
+            }
+        }
+        for (const auto* urlTemplate : kDefaultTemplates) append(urlTemplate, false);
+        return sources;
+    }
 
-        if (!IsValidTemplate(remoteUrlTemplate)) {
-            LOG_WARN("RemoteToml: remote.url_template must contain "
-                     "{channel}, {component}, and {sha256}; remote fetch disabled");
-            return {};
+    static bool IsMetadataToml(std::string_view body)
+    {
+        try {
+            const auto root = toml::parse(body);
+            // Both metadata channels contain named tables. Detailed pattern / IPC
+            // validation remains in their respective loaders.
+            for (const auto& [key, node] : root) {
+                if (const auto* table = node.as_table(); table && !table->empty())
+                    return true;
+            }
+        } catch (const toml::parse_error&) {
+        }
+        return false;
+    }
+
+    static std::string FetchSources(const std::vector<Source>& sources)
+    {
+        auto pending = std::make_shared<PendingFetch>();
+        pending->remaining = sources.size();
+        pending->preferredPending = !sources.empty() && sources.front().preferred;
+        for (const auto& source : sources) {
+            bool started = false;
+            try {
+                // Own every captured value: Fetch may return while slower HTTP
+                // requests finish under their normal transport timeouts.
+                started = OSTPlatform::Thread::StartDetached([pending, source] {
+                    std::string body;
+                    try {
+                        auto http = OSTPlatform::Http::Execute(
+                            L"GET", source.url.c_str(), nullptr, 0, nullptr);
+                        if (http.ok && http.status == 200 && IsMetadataToml(http.body)) {
+                            body = std::move(http.body);
+                        } else {
+                            LOG_WARN("RemoteToml: source failed or invalid TOML: {} (ok={} HTTP={})",
+                                     source.url, http.ok, http.status);
+                        }
+                    } catch (...) {
+                        LOG_WARN("RemoteToml: source request failed: {}", source.url);
+                    }
+                    pending->Complete(source.preferred, std::move(body));
+                    return uint32_t{0};
+                });
+            } catch (...) {
+                // Treat thread creation / capture failures like a failed source.
+            }
+            if (!started) {
+                LOG_WARN("RemoteToml: could not start source request: {}", source.url);
+                pending->Complete(source.preferred, {});
+            }
         }
 
-        return { remoteUrlTemplate };
+        std::unique_lock<std::mutex> lock(pending->mutex);
+        pending->ready.wait(lock, [&] {
+            return !pending->preferredBody.empty() ||
+                   (!pending->preferredPending && !pending->firstFallbackBody.empty()) ||
+                   pending->remaining == 0;
+        });
+        pending->closed = true;
+        return !pending->preferredBody.empty()
+            ? std::move(pending->preferredBody) : std::move(pending->firstFallbackBody);
     }
 } // namespace
 
@@ -104,69 +220,48 @@ Result Fetch(const Request& request)
                  request.channel, request.component, cacheDir.string(), mkdirEc.message());
     }
 
-    // 3. Try remote (mirror chain with early-out on 404).
-    const std::vector<std::string> urlTemplates = BuildUrlTemplates();
-    OSTPlatform::Http::Result http;
-    std::string lastUrl;
-
-    for (size_t i = 0; i < urlTemplates.size(); ++i) {
-        lastUrl = ExpandTemplate(urlTemplates[i], request, out.sha256);
-        LOG_INFO("RemoteToml({}/{}): downloading {}",
-                 request.channel, request.component, lastUrl);
-
-        http = OSTPlatform::Http::Execute(L"GET", lastUrl.c_str(),
-                                          nullptr, 0, nullptr);
-
-        if (http.ok && http.status == 200) break;
-
-        if (http.ok && http.status == 404) {
-            LOG_WARN("RemoteToml({}/{}): mirror has no such file (HTTP 404): {}",
-                     request.channel, request.component, lastUrl);
-            break;   // all mirrors serve same data
-        }
-
-        if (i + 1 < urlTemplates.size()) {
-            LOG_WARN("RemoteToml({}/{}): mirror failed ({} ok={} HTTP={}), falling back",
-                     request.channel, request.component, lastUrl, http.ok, http.status);
-        }
-    }
+    // 3. Race all distinct sources; a configured source keeps priority until
+    // it fails / reaches the existing HTTP timeout. Workers never write the cache.
+    const auto sources = BuildSources(request, out.sha256);
+    LOG_INFO("RemoteToml({}/{}): requesting {} sources concurrently",
+             request.channel, request.component, sources.size());
+    std::string body = FetchSources(sources);
 
     // 4. Remote OK → write cache, return body.
-    if (http.ok && http.status == 200 && !http.body.empty()) {
+    if (!body.empty()) {
         std::ofstream ofs;
         if (!cachePath.empty()) ofs.open(cachePath, std::ios::binary);
         if (ofs) {
-            ofs.write(http.body.data(),
-                      static_cast<std::streamsize>(http.body.size()));
+            ofs.write(body.data(), static_cast<std::streamsize>(body.size()));
             LOG_INFO("RemoteToml({}/{}): cached to {}",
                      request.channel, request.component, cachePathText);
         } else {
             LOG_WARN("RemoteToml({}/{}): could not open {} for writing",
                      request.channel, request.component, cachePathText);
         }
-        out.body = std::move(http.body);
+        out.body = std::move(body);
         out.ok = true;
         return out;
     }
 
     // 5. Remote failed → fall back to whatever is cached for this exact SHA.
     if (!cachePath.empty() && fs::exists(cachePath)) {
-        LOG_WARN("RemoteToml({}/{}): remote failed (last URL {} HTTP {}); "
+        LOG_WARN("RemoteToml({}/{}): remote sources failed or timed out; "
                  "falling back to local cache {}",
                  request.channel, request.component,
-                 lastUrl.empty() ? "<none>" : lastUrl, http.status, cachePathText);
+                 cachePathText);
 
         std::ifstream ifs(cachePath, std::ios::binary);
         if (ifs) {
             std::string buf((std::istreambuf_iterator<char>(ifs)),
                              std::istreambuf_iterator<char>());
-            if (!buf.empty()) {
+            if (IsMetadataToml(buf)) {
                 out.body = std::move(buf);
                 out.ok = true;
                 out.fromCache = true;
                 return out;
             }
-            LOG_WARN("RemoteToml({}/{}): cache file empty: {}",
+            LOG_WARN("RemoteToml({}/{}): cache file empty or invalid TOML: {}",
                      request.channel, request.component, cachePathText);
         } else {
             LOG_WARN("RemoteToml({}/{}): could not open cache file: {}",
@@ -175,9 +270,8 @@ Result Fetch(const Request& request)
     }
 
     // 6. Total failure — caller handles popup / degraded mode.
-    LOG_WARN("RemoteToml({}/{}): no source available (last URL: {} HTTP {})",
-             request.channel, request.component,
-             lastUrl.empty() ? "<none>" : lastUrl, http.status);
+    LOG_WARN("RemoteToml({}/{}): no source available",
+             request.channel, request.component);
     return out;
 }
 

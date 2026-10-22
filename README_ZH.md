@@ -198,23 +198,27 @@ C++ 运行时提供两个 Lua 辅助函数：
 
 OpenSteamTool 不再在 DLL 中内置字节模式签名。相反，每次启动时它计算磁盘上 `steamclient64.dll` 和 `steamui.dll` 的 SHA-256，并从上游跟踪器 [`OpenSteam001/steam-monitor`](https://github.com/OpenSteam001/steam-monitor)（`pattern` 分支）查找匹配的模式文件
 
-查找顺序（每次启动）：
+Windows 每次启动时并发请求以下五个内置源（`pattern` 和 `ipc` 通道共用）：
 
-1. **GitHub raw** — `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/...`。规范来源
-2. **jsDelivr CDN** — 如果 GitHub raw 无法访问（连接拒绝/超时/5xx）时自动回退。无需配置。在 `raw.githubusercontent.com` 被封锁但 jsDelivr 可访问的地区很有用（如中国大陆）
-3. **本地缓存** — `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`。仅当远程不可达时使用。每次成功远程获取后覆盖缓存
+1. **官方 GitHub raw** — `OpenSteam001/steam-monitor`
+2. **官方 jsDelivr CDN** — 同一仓库的 CDN
+3. **社区 GitHub raw** — `madoiscool/steam-monitor`
+4. **社区 jsDelivr CDN** — 同一社区仓库的 CDN
+5. **LuaTools** — `https://git.lua.tools/luatools/steam-monitor`
+
+没有自定义源时，采用最早通过检查的 HTTP 200 响应；内容必须能解析为 TOML，并包含非空的命名表。具体签名和 IPC 字段仍由对应加载器校验。所有远程源失败后，才回退到同一 SHA 的本地缓存：`<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`（IPC 使用 `ipc` 目录）。仅选中的远程结果写入缓存，晚到结果不会覆盖它。
 
 每次启动都会咨询远程，因此用户自动获取上游重新发布（例如机器人添加新签名或修复现有签名），无需清除任何缓存
 
-如果某步返回 **HTTP 404**，镜像循环立即停止——所有镜像提供相同内容，因此 404 意味着上游机器人尚未为此 Steam 版本发布 TOML。代码然后回退到本地缓存（如果存在）；否则出现一次性弹窗，显示不匹配的 DLL 名称、其 SHA-256、预期缓存路径和上游 URL。仅禁用与该 DLL 相关的钩子——OpenSteamTool 的其余部分继续工作
+某个源返回 **HTTP 404**、网络错误或无效 TOML，不会阻止其他源成功。所有远程源和同 SHA 缓存都不可用时，出现一次性弹窗，显示不匹配的 DLL 名称、其 SHA-256、预期缓存路径和上游 URL。仅禁用与该 DLL 相关的钩子——OpenSteamTool 的其余部分继续工作。
 
 如果你知道给定版本的布局，也可以手动将模式 TOML 放入缓存目录；文件名必须为 `<sha256>.toml`。下次远程不可达时缓存回退会拾取它
 
-> 每次启动执行简短的出站 HTTPS 请求（每个 DLL 一个：`steamclient64.dll`、`steamui.dll`）。下载的内容很小（每个约 10 KB），工作在线程上运行，因此永远不会阻塞 Steam 加载器
+> 每次元数据获取会向上述源发起最多五个并发 HTTPS 请求，另加一个不重复的自定义源。沿用原有 HTTP 超时：Windows 的解析/连接/发送/接收分别为 5/5/10/10 秒，没有新增整体截止时间。选定结果后可直接返回，较慢请求在后台按原有超时规则结束。本节描述 Windows 远程加载流程；macOS 的内嵌元数据流程不变。
 
 #### 使用不同的镜像
 
-对大多数用户来说，内置的 **GitHub -> jsDelivr** 回退已经足够。要使用私有镜像或内网服务器，配置完整的 URL 模板。自定义镜像替换内置远程源；本地缓存回退仍然可用
+要优先使用私有镜像或内网服务器，可配置完整的 URL 模板。自定义源与内置源同时请求，**不会替换或禁用内置源**：自定义源成功时优先采用；即使备用结果先到，也会等自定义源失败或按原有 HTTP 规则超时后，再采用最早成功的备用结果。展开后相同的 URL 只请求一次。无效模板会被忽略，内置源仍会继续请求。
 
 模板必须包含 `{channel}`、`{component}` 和 `{sha256}`。当前使用的通道是 `pattern` 和 `ipc`
 

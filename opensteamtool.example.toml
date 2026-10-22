@@ -103,9 +103,13 @@ enabled = false
 # library = "plugins/cloud_redirect.dylib" # macOS
 
 [remote]
-# Optional metadata mirror. Leave unset to use GitHub with jsDelivr fallback.
-# A custom mirror replaces the built-in remote sources and must include all
-# three placeholders: {channel}, {component}, and {sha256}.
+# Optional preferred metadata source (Windows remote loading).
+# Five built-in sources are always requested concurrently: official GitHub/CDN,
+# community GitHub/CDN, and LuaTools. A custom source runs alongside them and
+# takes priority until it fails or reaches the existing HTTP timeout.
+# Then the first successful backup is used; all failures fall back to SHA cache.
+# Duplicate URLs are requested once. No HTTP timeout settings are changed.
+# Must include {channel}, {component}, and {sha256}; invalid templates are ignored.
 #
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
 # url_template = "https://fast.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml"

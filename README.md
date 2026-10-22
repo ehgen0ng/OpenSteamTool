@@ -197,23 +197,27 @@ The C++ runtime provides two Lua helpers:
 
 OpenSteamTool no longer ships byte-pattern signatures inside the DLL. Instead, on each launch it computes the SHA-256 of `steamclient64.dll` and `steamui.dll` on disk and looks up a matching pattern file from the upstream tracker at [`OpenSteam001/steam-monitor`](https://github.com/OpenSteam001/steam-monitor) (`pattern` branch).
 
-Lookup order (every launch):
+On Windows, each launch requests five built-in sources concurrently (shared by the `pattern` and `ipc` channels):
 
-1. **GitHub raw** — `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/...`. Canonical source.
-2. **jsDelivr CDN** — automatic fallback if GitHub raw is unreachable (connection refused / timeout / 5xx). No configuration required. Useful in regions where `raw.githubusercontent.com` is blocked but jsDelivr is reachable (e.g. mainland China).
-3. **Local cache** — `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`. Used **only** when remote is unreachable. The cache is overwritten after every successful remote fetch.
+1. **Official GitHub raw** — `OpenSteam001/steam-monitor`.
+2. **Official jsDelivr CDN** — the same repository via CDN.
+3. **Community GitHub raw** — `madoiscool/steam-monitor`.
+4. **Community jsDelivr CDN** — the community repository via CDN.
+5. **LuaTools** — `https://git.lua.tools/luatools/steam-monitor`.
+
+Without a custom source, the first HTTP 200 response that passes the basic checks wins: it must parse as TOML and contain a nonempty named table. Pattern and IPC loaders still validate their respective fields. Only when all remote sources fail does loading fall back to the exact-SHA local cache: `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml` (`ipc` for IPC metadata). Only the selected remote result updates the cache; late responses cannot overwrite it.
 
 Remote is consulted on every launch so users automatically pick up upstream re-publications (e.g. the bot adding a new signature, or fixing an existing one) without having to clear any cache.
 
-If a step returns **HTTP 404** the mirror loop stops immediately — all mirrors serve the same content, so a 404 means the upstream bot has not yet published a TOML for this Steam build. The code then falls back to the local cache if one exists; otherwise a one-shot popup appears with the unmatched DLL name, its SHA-256, the expected cache path, and the upstream URL. Only the hooks tied to that DLL are disabled — the rest of OpenSteamTool keeps working.
+An **HTTP 404**, network error, or invalid TOML from one source does not prevent other sources from succeeding. If all remote sources and the exact-SHA cache are unavailable, a one-shot popup appears with the unmatched DLL name, its SHA-256, the expected cache path, and the upstream URL. Only the hooks tied to that DLL are disabled — the rest of OpenSteamTool keeps working.
 
 You can also drop a pattern TOML into the cache directory manually if you know the layout for a given build; the file name must be `<sha256>.toml`. The cache fallback will pick it up the next time remote is unreachable.
 
-> A short outbound HTTPS request is performed at every launch (one per DLL: `steamclient64.dll`, `steamui.dll`). The downloaded bodies are tiny (~10 KB each) and the work runs on a worker thread, so it never blocks Steam's loader.
+> Each metadata fetch issues up to five concurrent HTTPS requests, plus one distinct custom source. Existing HTTP timeouts are unchanged: Windows uses 5/5/10/10 seconds for resolve/connect/send/receive, with no new overall deadline. Once a result is selected, slower requests finish in the background under their existing timeout rules. This section describes Windows remote loading; macOS embedded metadata loading is unchanged.
 
 #### Using a different mirror
 
-For most users, the built-in **GitHub -> jsDelivr** fallback is enough. To use a private mirror or intranet server, configure a full URL template. A custom mirror replaces the built-in remote sources; local cache fallback remains available.
+To prefer a private mirror or intranet server, configure a full URL template. The custom source runs concurrently with the built-in sources and **does not replace or disable them**. A successful custom response takes priority: even if a backup responds first, it is only selected after the custom source fails or reaches its existing HTTP timeout. The earliest successful backup is then used. Identical expanded URLs are requested once. An invalid custom template is ignored without disabling the built-in sources.
 
 The template must include `{channel}`, `{component}`, and `{sha256}`. Channels currently used are `pattern` and `ipc`.
 
