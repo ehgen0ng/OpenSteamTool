@@ -22,7 +22,7 @@ namespace Hooks_Misc {
     // Call when the game uses SteamNetworkingSockets (IPC interface 46).
     void NotifyNetworkingSocketsUsed();
 
-    // True once P2P started — GetAppID reports 480; before, the real appid.
+    // True once OnlineFix P2P started, unless -realappid keeps GetAppID real.
     bool ShouldReportOnlineFixAppId();
 
     // Grow a CUtlBuffer to at least 'newCapacity' bytes and set m_Put = newCapacity.

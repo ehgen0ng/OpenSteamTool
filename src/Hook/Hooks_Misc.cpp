@@ -17,6 +17,8 @@ namespace {
     AppId_t   g_OnlineFixRealAppId;
     // True once the game starts SteamNetworkingSockets P2P (see GetAppID handler).
     bool      g_NetworkingSocketsActive;
+    // Keep GetAppID on the real appid when -realappid accompanies -onlinefix.
+    bool      g_SuppressAppIdFlip;
     std::unordered_map<AppId_t, std::string> g_GameNameCache;
 
 
@@ -34,10 +36,13 @@ namespace {
         {
             g_OnlineFixRealAppId = appId;
             g_NetworkingSocketsActive = false;
+            g_SuppressAppIdFlip = strstr(cmdLine, "-realappid") != nullptr;
             pGameID->SetAppID(kOnlineFixAppId);
-            LOG_MISC_INFO("SpawnProcess: appid {} -> {}, cmd=\"{}\"",appId, kOnlineFixAppId, cmdLine);
+            LOG_MISC_INFO("SpawnProcess: appid {} -> {}, realappid={}, cmd=\"{}\"",
+                          appId, kOnlineFixAppId, g_SuppressAppIdFlip, cmdLine);
         } else {
             g_OnlineFixRealAppId = 0;
+            g_SuppressAppIdFlip = false;
         }
     }
 
@@ -151,11 +156,16 @@ namespace Hooks_Misc {
     void NotifyNetworkingSocketsUsed() {
         if (g_OnlineFixRealAppId && !g_NetworkingSocketsActive) {
             g_NetworkingSocketsActive = true;
-            LOG_MISC_INFO("NetworkingSockets active: GetAppID now reports 480 for cert match");
+            LOG_MISC_INFO("NetworkingSockets active: GetAppID reports {} (realappid={})",
+                          g_SuppressAppIdFlip ? g_OnlineFixRealAppId : kOnlineFixAppId,
+                          g_SuppressAppIdFlip);
         }
     }
 
     bool ShouldReportOnlineFixAppId() {
+        // Some games initialize NetworkingSockets before checking their appid.
+        // Keep the real appid for those games when explicitly requested.
+        if (g_SuppressAppIdFlip) return false;
         return g_OnlineFixRealAppId != 0 && g_NetworkingSocketsActive;
     }
 

@@ -105,6 +105,7 @@ La herramienta de Windows `extract_tickets` vuelca las cadenas hexadecimales de 
 ### Online Fix(Reparacion para habilitar el Online)
 
 - Añade `-onlinefix` a los parámetros de lanzamiento de Steam para habilitar el juego en línea basado en el AppId 480 en juegos que utilizan emparejamiento (matchmaking) por salas (lobbies). La limitación actual es que solo se puede ejecutar uno de estos juegos a la vez. Para revertirlo, simplemente elimina -onlinefix de los parámetros de lanzamiento; el juego en línea volverá a la normalidad en el próximo inicio.
+- Si el juego se cierra o falla la comprobación del AppID con `-onlinefix`, prueba `-onlinefix -realappid`. Esto mantiene el AppID real en `GetAppID()` incluso después de inicializar SteamNetworkingSockets; la sesión de OnlineFix sigue usando 480. Úsalo solo cuando sea necesario: algunos juegos P2P requieren que `GetAppID()` devuelva 480. `-realappid` por sí solo no tiene efecto ni garantiza la compatibilidad en línea.
 
 ### Guardado en la nube
 

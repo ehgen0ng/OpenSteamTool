@@ -109,6 +109,7 @@ Windows 工具 `extract_tickets` 会转储你需要的 `AppTicket` 和 `ETicket`
 ### 在线修复
 
 - 在 Steam 启动参数中添加 `-onlinefix` 以在需要使用大厅匹配的游戏里启用基于 480 的在线游戏。当前限制是同一时间只能运行一个这样的游戏。要撤销，只需从启动参数中移除 `-onlinefix` — 下次启动时在线游戏恢复正常
+- 如果添加 `-onlinefix` 后游戏退出或 AppID 校验失败，可尝试 `-onlinefix -realappid`。这会让 `GetAppID()` 在 SteamNetworkingSockets 初始化后仍返回真实 AppID；OnlineFix 会话仍使用 480。仅在需要时启用：部分 P2P 游戏依赖 `GetAppID()` 返回 480。单独添加 `-realappid` 不生效，也不保证游戏能够联机。
 
 ### 云存档
 

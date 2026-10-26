@@ -109,6 +109,7 @@ The Windows `extract_tickets` tool dumps the `AppTicket` and `ETicket` hex strin
 ### Online Fix
 
 - Add `-onlinefix` to the Steam launch parameters to enable 480-based online play in games that use lobby matchmaking. The current limitation is that only one such game can run at a time.To revert, simply remove -onlinefix from the launch parameters — online play returns to normal on the next launch.
+- If a game exits or fails its AppID check with `-onlinefix`, try `-onlinefix -realappid`. This keeps `GetAppID()` reporting the real AppID even after SteamNetworkingSockets is initialized; the OnlineFix session still uses 480. Use it only when needed: some P2P games require `GetAppID()` to report 480. `-realappid` has no effect on its own and does not guarantee online compatibility.
 
 ### Cloud saves
 
