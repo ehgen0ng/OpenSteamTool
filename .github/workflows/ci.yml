@@ -1,10 +1,14 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [main, macos-port]
   push:
-    branches: [main]
+    branches: [main, macos-port]
+
+permissions:
+  contents: read
 
 # Cancel previous runs on the same PR / branch when new commits arrive.
 concurrency:
@@ -24,6 +28,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Configure
         run: cmake -S src -B build -G "Ninja Multi-Config"
@@ -35,6 +41,54 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenSteamTool-${{ matrix.config }}-pr${{ github.event.pull_request.number || github.run_number }}
+          name: OpenSteamTool-windows-x64-${{ matrix.config }}-${{ github.run_number }}
           path: build/${{ matrix.config }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS arm64 (${{ matrix.config }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, Debug]
+    env:
+      BUILD_CONFIG: ${{ matrix.config }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
+        shell: bash
+        run: |
+          # Build arm64 with separate Debug and Release dependency trees.
+          set -euo pipefail
+          cmake -S src -B "build/macos/$BUILD_CONFIG" -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build "build/macos/$BUILD_CONFIG" --parallel "$(sysctl -n hw.logicalcpu)"
+
+      - name: Package
+        shell: bash
+        run: |
+          # Keep the launcher and its executable permissions in the archive.
+          set -euo pipefail
+          export COPYFILE_DISABLE=1
+          package_dir="$RUNNER_TEMP/package-$BUILD_CONFIG"
+          mkdir -p "$package_dir"
+          cp "build/macos/$BUILD_CONFIG/libOpenSteamTool.dylib" "$package_dir/"
+          cp tools/macos/steam-inject.sh opensteamtool.example.toml "$package_dir/"
+          chmod +x "$package_dir/steam-inject.sh"
+          if [ "$BUILD_CONFIG" = Debug ]; then
+            cp -R "build/macos/$BUILD_CONFIG/libOpenSteamTool.dylib.dSYM" "$package_dir/"
+          fi
+          (cd "$package_dir" && zip -qry -X \
+            "$GITHUB_WORKSPACE/OpenSteamTool-macos-arm64-$BUILD_CONFIG.zip" .)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSteamTool-macos-arm64-${{ matrix.config }}-${{ github.run_number }}
+          path: OpenSteamTool-macos-arm64-${{ matrix.config }}.zip
+          if-no-files-found: error
           retention-days: 7
