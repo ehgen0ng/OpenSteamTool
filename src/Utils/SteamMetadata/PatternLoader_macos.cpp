@@ -289,7 +289,7 @@ void ShowUnsupportedPopup(const std::string& dllPath, const std::string& sha256)
         "restart Steam.\n\n"
         "SHA-256:\n  " + (sha256.empty() ? "(hash failed)" : sha256) + "\n\n"
         "Report this at:\n"
-        "https://github.com/OpenSteam001/OpenSteamTool/issues");
+        "https://github.com/ehgen0ng/OpenSteamTool/issues");
 }
 
 // Prefer a module-relative RVA and verify its bytes; fall back to scanning
@@ -439,7 +439,7 @@ void ReportMissingFunctions() {
         list +
         "\nHooks for these functions are disabled for this session.\n\n"
         "Please report this at:\n"
-        "https://github.com/OpenSteam001/OpenSteamTool/issues");
+        "https://github.com/ehgen0ng/OpenSteamTool/issues");
 }
 
 } // namespace PatternLoader

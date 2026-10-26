@@ -152,7 +152,7 @@ namespace {
             "  2. Drop a matching TOML at:\n"
             "       " + manualPath + "\n"
             "  3. Check upstream:\n"
-            "       https://github.com/OpenSteam001/steam-monitor/tree/ipc/steamclient");
+            "       https://github.com/madoiscool/steam-monitor/tree/ipc/steamclient");
     }
 
 } // namespace

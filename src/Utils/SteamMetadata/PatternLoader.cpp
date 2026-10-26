@@ -163,9 +163,9 @@ static void ShowDownloadFailedPopup(const std::string& dllName,
         "  2. Drop a matching TOML at:\n"
         "       " + manualPath + "\n"
         "  3. Check upstream:\n"
-        "       https://github.com/OpenSteam001/steam-monitor/tree/pattern/" + component + "\n"
+        "       https://github.com/madoiscool/steam-monitor/tree/pattern/" + component + "\n"
         "  4. Report the diagnostics below:\n"
-        "       https://github.com/OpenSteam001/OpenSteamTool/issues");
+        "       https://github.com/ehgen0ng/OpenSteamTool/issues");
 }
 
 } // namespace
@@ -296,7 +296,7 @@ void ReportMissingFunctions()
         list +
         "\nHooks for these functions are disabled for this session.\n\n"
         "Please report this at:\n"
-        "https://github.com/OpenSteam001/OpenSteamTool/issues");
+        "https://github.com/ehgen0ng/OpenSteamTool/issues");
 }
 
 } // namespace PatternLoader

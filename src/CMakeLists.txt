@@ -1,10 +1,28 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenSteamTool VERSION 1.0.0 LANGUAGES C CXX)
+project(OpenSteamTool LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
-set(OPENSTEAMTOOL_VERSION "${PROJECT_VERSION}" CACHE STRING "Version string embedded into OpenSteamTool.dll")
+set(OPENSTEAMTOOL_VERSION "" CACHE STRING "Embedded version override (empty: derive from Git)")
+if(OPENSTEAMTOOL_VERSION STREQUAL "")
+    # Release builds supply an explicit version; local and CI builds identify
+    # the checked-out tag/commit instead of reporting a fixed project version.
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" describe --tags --always --dirty
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE OPENSTEAMTOOL_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif()
+    if(OPENSTEAMTOOL_VERSION STREQUAL "")
+        set(OPENSTEAMTOOL_VERSION "unknown")
+    endif()
+endif()
+message(STATUS "OpenSteamTool version: ${OPENSTEAMTOOL_VERSION}")
 
 # Allow CMAKE_MSVC_RUNTIME_LIBRARY to control runtime selection for all targets,
 # including dependencies pulled in via FetchContent.
