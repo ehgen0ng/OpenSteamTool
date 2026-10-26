@@ -11,6 +11,8 @@
 namespace LuaConfig{
     bool HasDepot(AppId_t appId, bool checkOwned=true);
     bool IsOwned(AppId_t appId);
+    AppId_t GetAppIdForProcess(const std::string& imageName);
+    bool IsForcedDenuvo(AppId_t appId);
     void MarkOwned(AppId_t appId);
     std::vector<AppId_t> GetAllDepotIds();
     std::vector<uint8> GetDecryptionKey(AppId_t appId);

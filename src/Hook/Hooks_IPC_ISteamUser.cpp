@@ -17,11 +17,6 @@ namespace {
         GetSteamIDResp resp{pWrite};
         if (!resp.ok()) return;
 
-        if (!PipeManager::DenuvoAuth::IsAuthorizedPipe(pipe)) {
-            LOG_IPC_TRACE("IClientUser::GetSteamID: AppId={} not in authorization window, skip spoofing", appId);
-            return;
-        }
-
         const uint64 spoofed = AppTicket::GetSpoofSteamID(appId);
         if (!spoofed) {
             LOG_IPC_WARN("IClientUser::GetSteamID: AppId={} no valid steamid - cannot spoof", appId);
@@ -49,8 +44,7 @@ namespace {
         if (PipeManager::DenuvoAuth::IsAuthorizedPipe(pipe)) {
             ticketSource = AppTicket::AppTicketSource::CredentialStoreOnly;
         } else {
-            LOG_IPC_DEBUG("IClientUser::GetAppOwnershipTicketExtendedData: AppId={} not in authorization window, only forge available", appId);
-            ticketSource = AppTicket::AppTicketSource::ForgeOnly;
+            ticketSource = AppTicket::AppTicketSource::CredentialStoreThenForge;
         }        
         if (!AppTicket::GetAppOwnershipTicket(appId, ticket, ticketSource)) return;
 

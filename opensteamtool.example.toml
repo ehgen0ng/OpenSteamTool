@@ -88,7 +88,7 @@ enabled = false
 
 [cloud]
 # Optional Steam Cloud save redirection for unlocked ("lua") games, powered by
-# CloudRedirect (https://github.com/Selectively11/CloudRedirect).
+# CloudRedirect (https://github.com/ehgen0ng/CloudRedirect).
 # When enabled, OpenSteamTool loads the CloudRedirect library inside Steam,
 # registers every addappid() game as a redirected app, and routes their Steam
 # Cloud RPCs through CloudRedirect's cloud-save engine.

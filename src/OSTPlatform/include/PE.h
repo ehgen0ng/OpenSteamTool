@@ -43,8 +43,11 @@ struct Section {
     uint32_t virtualSize = 0;
     uint32_t rawOffset = 0;
     uint32_t rawSize = 0;
+    uint32_t characteristics = 0;
 
     bool ContainsRva(uint32_t rva) const;
+    bool IsExecutable() const { return (characteristics & 0x20000000u) != 0; }
+    bool IsWritable() const { return (characteristics & 0x80000000u) != 0; }
 };
 
 struct Export {

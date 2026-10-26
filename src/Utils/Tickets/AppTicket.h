@@ -38,6 +38,9 @@ namespace AppTicket {
     //Get spoof steamID From the cached AppOwnershipTicket for the given AppId.
     uint64_t GetSpoofSteamID(AppId_t appId);
 
+    // Returns zero if the ticket is too short to contain a SteamID.
+    uint64_t ExtractSteamIdFromTicketBytes(const std::vector<uint8_t>& ticket);
+
     // Write AppTicket binary data to Steam's local credential store.
     bool WriteAppOwnershipTicket(AppId_t appId, const std::vector<uint8_t>& data);
 

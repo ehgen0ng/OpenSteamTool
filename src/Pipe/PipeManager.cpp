@@ -6,8 +6,11 @@
 #include "Pipe/Features/Injection/Injection.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/Config/LuaConfig.h"
+#include "Hook/Hooks_Misc.h"
 
+#include <chrono>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 
 namespace PipeManager {
@@ -44,6 +47,22 @@ namespace {
         return snapshot;
     }
 
+    AppId_t ResolveAppId(const ProcessInspector::ProcessSnapshot& snapshot) {
+        const AppId_t envAppId = snapshot.ResolveAppId();
+        if (envAppId != k_uAppIdInvalid) return envAppId;
+        if (snapshot.steamClientProcess) return k_uAppIdInvalid;
+
+        // Match the fork's bounded retry for a pipe whose app binding is late.
+        // Process-name mappings are only a fallback when both sources fail.
+        constexpr int kAttempts = 10;
+        for (int attempt = 0; attempt < kAttempts; ++attempt) {
+            const AppId_t pipeAppId = Hooks_Misc::ResolveAppId();
+            if (pipeAppId != k_uAppIdInvalid) return pipeAppId;
+            if (attempt + 1 < kAttempts) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return LuaConfig::GetAppIdForProcess(snapshot.imageName);
+    }
+
 } // namespace
 
 void OnHandshake(CPipeClient* pipe) {
@@ -67,14 +86,14 @@ void OnHandshake(CPipeClient* pipe) {
         return;
     }
 
-    const AppId_t appId = snapshot.ResolveAppId();
+    const AppId_t appId = ResolveAppId(snapshot);
     const bool trackedApp = appId != k_uAppIdInvalid && LuaConfig::HasDepot(appId, false);
 
     PipeContext ctx{};
     ctx.pipe = pipe;
     ctx.process = processKey;
     ctx.appId = appId;
-    ctx.gameProcess = snapshot.likelyGameProcess;
+    ctx.gameProcess = !snapshot.steamClientProcess && (snapshot.likelyGameProcess || trackedApp);
     ctx.trackedApp = trackedApp;
     ctx.owned = trackedApp && LuaConfig::IsOwned(appId);
 

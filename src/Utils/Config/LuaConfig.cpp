@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -35,6 +36,13 @@ namespace LuaConfig{
     static std::unordered_map<std::string, std::unordered_map<uint64_t, ManifestOverride>> g_fileManifestOverrides;
     static std::unordered_map<std::string, uint64_t> g_fileParseSequence;
     static uint64_t g_nextFileParseSequence = 0;
+    struct DenuvoOptions {
+        std::unordered_map<std::string, AppId_t> processes;
+        std::unordered_set<AppId_t> forcedApps;
+        uint64_t sequence = 0;
+    };
+    static std::unordered_map<std::string, DenuvoOptions> g_fileDenuvoOptions;
+    static std::mutex g_denuvoOptionsMutex;
     // Reference count: how many files provide each depot.
     static std::unordered_map<AppId_t, uint32_t> g_depotRefCount;
     // mtime (unix epoch seconds) of each parsed .lua file, captured at ParseFile entry.
@@ -418,6 +426,65 @@ namespace LuaConfig{
         return 0;
     }
 
+    static std::string LowerProcessName(std::string name) {
+        for (char& ch : name) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return name;
+    }
+
+    static AppId_t CheckDenuvoAppId(lua_State* L) {
+        luaL_argcheck(L, lua_isinteger(L, 1), 1, "appId must be integer");
+        const lua_Integer appId = luaL_checkinteger(L, 1);
+        luaL_argcheck(L, appId > 0 && appId <= UINT32_MAX, 1, "appId out of range");
+        // These declarations belong to the Lua file being loaded.
+        if (g_currentFile.empty()) luaL_error(L, "Denuvo options must be set while loading a Lua file");
+        return static_cast<AppId_t>(appId);
+    }
+
+    static int lua_addprocess(lua_State* L) {
+        const AppId_t appId = CheckDenuvoAppId(L);
+        size_t length = 0;
+        const char* name = luaL_checklstring(L, 2, &length);
+        luaL_argcheck(L, length != 0, 2, "process name must not be empty");
+        const auto lower = LowerProcessName(std::string(name, length));
+        std::lock_guard lock(g_denuvoOptionsMutex);
+        auto& options = g_fileDenuvoOptions[g_currentFile];
+        options.sequence = g_fileParseSequence.at(g_currentFile);
+        options.processes[lower] = appId;
+        return 0;
+    }
+
+    static int lua_forcedenuvo(lua_State* L) {
+        const AppId_t appId = CheckDenuvoAppId(L);
+        std::lock_guard lock(g_denuvoOptionsMutex);
+        auto& options = g_fileDenuvoOptions[g_currentFile];
+        options.sequence = g_fileParseSequence.at(g_currentFile);
+        options.forcedApps.insert(appId);
+        return 0;
+    }
+
+    AppId_t GetAppIdForProcess(const std::string& imageName) {
+        const auto lower = LowerProcessName(imageName);
+        std::lock_guard lock(g_denuvoOptionsMutex);
+        AppId_t appId = k_uAppIdInvalid;
+        uint64_t sequence = 0;
+        for (const auto& [file, options] : g_fileDenuvoOptions) {
+            const auto it = options.processes.find(lower);
+            if (it != options.processes.end() && options.sequence > sequence) {
+                appId = it->second;
+                sequence = options.sequence;
+            }
+        }
+        return appId;
+    }
+
+    bool IsForcedDenuvo(AppId_t appId) {
+        std::lock_guard lock(g_denuvoOptionsMutex);
+        for (const auto& [file, options] : g_fileDenuvoOptions) {
+            if (options.forcedApps.contains(appId)) return true;
+        }
+        return false;
+    }
+
     // ── init / cleanup ───────────────────────────────────────────
     static bool Initialize() {
         if (g_lua_state)
@@ -442,6 +509,8 @@ namespace LuaConfig{
         // All functions use register_func() so any case variant works
         // (e.g. setAppTICKET, addAppId, SETManifestid, etc.).
         register_func(g_lua_state, "addappid", lua_addappid);
+        register_func(g_lua_state, "addprocess", lua_addprocess);
+        register_func(g_lua_state, "forcedenuvo", lua_forcedenuvo);
         register_func(g_lua_state, "addtoken", lua_addtoken);
         // we don't need it?
         // register_func(g_lua_state, "pinapp", lua_pinApp);
@@ -632,7 +701,12 @@ namespace LuaConfig{
     void UnloadFile(const std::string& filePath) {
         auto depotsIt = g_fileDepots.find(filePath);
         auto manifestIt = g_fileManifestOverrides.find(filePath);
-        if (depotsIt == g_fileDepots.end() && manifestIt == g_fileManifestOverrides.end()) return;
+        bool removedDenuvoOptions = false;
+        {
+            std::lock_guard lock(g_denuvoOptionsMutex);
+            removedDenuvoOptions = g_fileDenuvoOptions.erase(filePath) != 0;
+        }
+        if (depotsIt == g_fileDepots.end() && manifestIt == g_fileManifestOverrides.end() && !removedDenuvoOptions) return;
 
         if (depotsIt != g_fileDepots.end()) {
             for (AppId_t id : depotsIt->second) {
@@ -819,6 +893,12 @@ namespace LuaConfig{
         }
         for (const auto& [filePath, _] : g_fileManifestOverrides) {
             rememberTracked(filePath);
+        }
+        {
+            std::lock_guard lock(g_denuvoOptionsMutex);
+            for (const auto& [filePath, _] : g_fileDenuvoOptions) {
+                rememberTracked(filePath);
+            }
         }
 
         for (const auto& filePath : trackedFiles) {

@@ -3,6 +3,7 @@
 #include "OSTPlatform/include/SteamCredentialStore.h"
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Logging/Log.h"
+#include <cstring>
 
 namespace AppTicket {
     constexpr AppId_t kLocalAppTicketSourceAppId = 7;
@@ -146,6 +147,13 @@ namespace AppTicket {
         return true;
     }
 
+    uint64_t ExtractSteamIdFromTicketBytes(const std::vector<uint8_t>& ticket) {
+        if (ticket.size() < kSteamIdTicketMinimumSize) return 0;
+        uint64_t steamId = 0;
+        std::memcpy(&steamId, ticket.data() + kAppTicketSteamIdOffset, sizeof(steamId));
+        return steamId;
+    }
+
     uint64_t GetSpoofSteamID(AppId_t appId) {
         // exclude those appids that are not in addappid
         if (!LuaConfig::HasDepot(appId)) {
@@ -162,11 +170,8 @@ namespace AppTicket {
         // ticket so spoofed responses match what the DRM layer expects.
         // Layout: ticket bytes start with [uint32 Size][uint32 Version][uint64 SteamID][...].
         std::vector<uint8_t> ticket = GetAppOwnershipTicketFromCredentialStore(appId);
-        if (ticket.size() >= kSteamIdTicketMinimumSize) {
-            const uint64_t steamID = reinterpret_cast<const uint64_t*>(ticket.data())[1];
-            LOG_DEBUG("GetSpoofSteamID for AppId {}: -> 0x{:X}({})", appId, steamID, steamID);
-            return steamID;
-        }
-        return 0;
+        const uint64_t steamID = ExtractSteamIdFromTicketBytes(ticket);
+        LOG_DEBUG("GetSpoofSteamID for AppId {}: -> 0x{:X}({})", appId, steamID, steamID);
+        return steamID;
     }
 }

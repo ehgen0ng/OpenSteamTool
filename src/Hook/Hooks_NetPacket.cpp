@@ -1093,6 +1093,29 @@ namespace Hooks_NetPacket_Cloud {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Local ownership ticket fallback (eMsg 858)
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_OwnershipTicket {
+    void HandleRecv(const uint8* pBody, uint32 cbBody) {
+        CMsgClientGetAppOwnershipTicketResponse response;
+        if (!response.ParseFromArray(pBody, cbBody)) return;
+        if (response.eresult() == k_EResultOK || !LuaConfig::HasDepot(response.app_id())) return;
+
+        const auto ticket = AppTicket::GetAppOwnershipTicketFromCredentialStore(response.app_id());
+        if (AppTicket::ExtractSteamIdFromTicketBytes(ticket) == 0) return;
+
+        response.set_ticket(ticket.data(), ticket.size());
+        response.set_eresult(k_EResultOK);
+        const size_t size = response.ByteSizeLong();
+        if (size > sizeof(g_NewBody)) return;
+        if (!response.SerializeToArray(g_NewBody, static_cast<int>(size))) return;
+        g_cbNewBody = static_cast<uint32>(size);
+        g_NeedReplaceBody = true;
+        LOG_NETPACKET_DEBUG("OwnershipTicket: using local ticket for appid={}", response.app_id());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
 //  Dispatch
 // ════════════════════════════════════════════════════════════════
 namespace {
@@ -1225,6 +1248,10 @@ namespace {
                 RecvServiceJob(hdr.target_job_name().c_str(), pBody, cbBody, pHdr, cbHdr);
             return;
         }
+
+        case k_EMsgClientGetAppOwnershipTicketResponse: // 858
+            Hooks_NetPacket_OwnershipTicket::HandleRecv(pBody, cbBody);
+            return;
 
         // migrated to IPC Layer Hooks_IPC_ISteamUser::GetEncryptedAppTicketResponse
         // case k_EMsgClientRequestEncryptedAppTicketResponse:     // 5527

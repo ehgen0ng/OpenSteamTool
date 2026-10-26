@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -64,6 +65,9 @@ namespace {
     constexpr uint32 kMinPackedModuleBytes = 80u * 1024u * 1024u;
     constexpr size_t kLegacyScanChunkBytes = 8ull * 1024ull * 1024ull;
     constexpr size_t kOepScanChunkBytes = 8ull * 1024ull * 1024ull;
+    constexpr size_t kProtectorBlobMinBytes = 4ull * 1024ull * 1024ull;
+    constexpr size_t kProtectorBlobEntropySampleBytes = 8ull * 1024ull * 1024ull;
+    constexpr double kProtectorBlobMinEntropy = 6.0;
 
     double BytesToMiB(uint64 bytes) {
         return static_cast<double>(bytes) / (1024.0 * 1024.0);
@@ -227,6 +231,41 @@ namespace {
         return match;
     }
 
+    double SectionEntropy(std::span<const uint8_t> bytes) {
+        if (bytes.empty()) return 0.0;
+        std::array<size_t, 256> counts{};
+        for (uint8_t byte : bytes) ++counts[byte];
+
+        double entropy = 0.0;
+        for (size_t count : counts) {
+            if (count == 0) continue;
+            const double probability = static_cast<double>(count) / bytes.size();
+            entropy -= probability * std::log2(probability);
+        }
+        return entropy;
+    }
+
+    std::optional<DetectionMatch> TryProtectedBlobSection(
+        const ModuleCandidate& module, const OSTPlatform::PE::Image& image) {
+        // Heuristic fallback: large, writable/executable, high-entropy sections
+        // can contain a protected payload. This is not a Denuvo signature.
+        for (const auto& section : image.Sections()) {
+            if (!section.IsExecutable() || !section.IsWritable()) continue;
+            if (section.rawSize < kProtectorBlobMinBytes) continue;
+            const size_t sampleSize = std::min<size_t>(section.rawSize, kProtectorBlobEntropySampleBytes);
+            const auto bytes = image.ReadRawBytes(section.rawOffset, sampleSize);
+            if (bytes.size() != sampleSize) continue;
+            const double entropy = SectionEntropy(bytes);
+            if (entropy < kProtectorBlobMinEntropy) continue;
+
+            LOG_PIPE_DEBUG("DenuvoAuth: protected-section heuristic path={} section={} entropy={:.2f}",
+                           module.path, section.name, entropy);
+            return DetectionMatch{DetectionMethod::ProtectedBlobSection, section.name,
+                                  image.EntryPointRva(), section.virtualAddress, section.rawOffset};
+        }
+        return std::nullopt;
+    }
+
     std::optional<DetectionMatch> DetectModule(
         const ModuleCandidate& module,
         const OSTPlatform::PE::Image& image) {
@@ -236,9 +275,9 @@ namespace {
         }
 
         if (const auto* legacySection = FindLegacyDenuvoSection(image)) {
-            return TryLegacySectionString(module, image, *legacySection);
+            if (const auto match = TryLegacySectionString(module, image, *legacySection)) return match;
         }
-        return std::nullopt;
+        return TryProtectedBlobSection(module, image);
     }
 
     std::vector<ModuleCandidate> EnumerateModules(PID_t pid) {
@@ -353,6 +392,7 @@ const char* ToString(DetectionMethod method) {
     case DetectionMethod::None: return "None";
     case DetectionMethod::LegacySectionString: return "LegacySectionString";
     case DetectionMethod::OepPattern: return "OepPattern";
+    case DetectionMethod::ProtectedBlobSection: return "ProtectedBlobSection";
     }
     return "Unknown";
 }
