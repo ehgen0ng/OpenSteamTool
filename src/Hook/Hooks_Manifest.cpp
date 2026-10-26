@@ -1,6 +1,7 @@
 #include "Hooks_Manifest.h"
 #include "HookMacros.h"
 #include "dllmain.h"
+#include "Utils/SteamMetadata/ManifestCache.h"
 #include <format>
 
 // ═══════════════════════════════════════════════════════════════════
@@ -42,6 +43,16 @@ namespace {
 
         if (!result) return result;
 
+        // PICS refresh can temporarily remove an app's own depot list. Do not
+        // let Steam persist that empty config and mark a zero-byte install as
+        // complete. Shared redistributables do not make the app's list valid.
+        if (AppId && (!pDepotInfo || pDepotInfo->m_Size == 0) &&
+            LuaConfig::HasDepot(AppId, false)) {
+            LOG_MANIFEST_WARN("BuildDepotDependency: app {} returned no own depots; "
+                              "keeping the previous config for a later retry", AppId);
+            return false;
+        }
+
         const auto& overrides = LuaConfig::GetManifestOverrides();
         if (overrides.empty()) return result;
 
@@ -63,6 +74,20 @@ namespace {
         return result;
     }
 
+    // Acquire only what Steam is requesting now, after any Lua GID override.
+    // Both Windows x64 and the verified macOS arm64 entry take these six args.
+    HOOK_FUNC(YldLoadDepotManifest, int64_t,
+              void* manager, void* user, AppId_t appId, uint32_t depotId,
+              uint64_t manifestGid, const char* branch)
+    {
+        if (depotId && manifestGid && LuaConfig::HasDepot(depotId)) {
+            ManifestCache::EnsureCached(depotId, manifestGid);
+        }
+        // Always preserve the original result. A cache miss/failure follows
+        // Steam's normal request-code path, including the existing OST hook.
+        return oYldLoadDepotManifest(manager, user, appId, depotId, manifestGid, branch);
+    }
+
 } // anonymous namespace
 
 namespace Hooks_Manifest {
@@ -70,12 +95,14 @@ namespace Hooks_Manifest {
     void Install() {
         HOOK_BEGIN();
         INSTALL_HOOK_C(BuildDepotDependency);
+        INSTALL_HOOK_C(YldLoadDepotManifest);
         HOOK_END();
     }
 
     void Uninstall() {
         UNHOOK_BEGIN();
         UNINSTALL_HOOK(BuildDepotDependency);
+        UNINSTALL_HOOK(YldLoadDepotManifest);
         UNHOOK_END();
     }
 }

@@ -8,6 +8,7 @@
 #include <winhttp.h>
 
 #include <chrono>
+#include <algorithm>
 #include <format>
 #include <string>
 
@@ -67,7 +68,8 @@ Result Execute(const wchar_t* method,
                uint32_t timeoutResolve,
                uint32_t timeoutConnect,
                uint32_t timeoutSend,
-               uint32_t timeoutRecv) {
+               uint32_t timeoutRecv,
+               uint32_t maxBodyBytes) {
     Result r;
 
     ParsedUrl pu = ParseUrl(url);
@@ -117,6 +119,9 @@ Result Execute(const wchar_t* method,
         return r;
     }
 
+    DWORD decompression = WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE;
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_DECOMPRESSION, &decompression, sizeof(decompression));
+
     if (headers && headers[0]) {
         if (!WinHttpAddRequestHeaders(
             hRequest,
@@ -145,37 +150,49 @@ Result Execute(const wchar_t* method,
             OSTP_LOG_WARN("{} - WinHttpQueryHeaders(status) failed (error={})", url ? url : "", GetLastError());
         }
 
+        // Bound the whole body receive phase, not each individual chunk. This
+        // matters when a manifest archive sends a large body very slowly.
+        const auto receiveStart = std::chrono::steady_clock::now();
+        const auto prepareRead = [&]() {
+            if (!timeoutRecv) return true;
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - receiveStart).count();
+            if (elapsed >= timeoutRecv) return false;
+            return WinHttpSetTimeouts(hRequest, timeoutResolve, timeoutConnect,
+                timeoutSend, static_cast<int>(timeoutRecv - elapsed)) != FALSE;
+        };
         DWORD avail = 0;
         while (true) {
-            if (!WinHttpQueryDataAvailable(hRequest, &avail)) {
+            if (!prepareRead() || !WinHttpQueryDataAvailable(hRequest, &avail)) {
                 OSTP_LOG_WARN("{} - WinHttpQueryDataAvailable failed (error={})", url ? url : "", GetLastError());
                 break;
             }
-            if (!avail) break;
+            if (!avail) { r.ok = true; break; }
 
             const size_t off = r.body.size();
+            if (avail > maxBodyBytes - off) {
+                OSTP_LOG_WARN("{} - response exceeds {} bytes", url, maxBodyBytes);
+                break;
+            }
             r.body.resize(off + avail);
             DWORD read = 0;
-            if (!WinHttpReadData(hRequest, r.body.data() + off, avail, &read)) {
+            if (!prepareRead() || !WinHttpReadData(hRequest, r.body.data() + off, avail, &read)) {
                 OSTP_LOG_WARN("{} - WinHttpReadData(size={}) failed (error={})",
                               url ? url : "", avail, GetLastError());
                 r.body.resize(off);
                 break;
             }
             r.body.resize(off + read);
-            if (r.body.size() > 256 * 1024) break;
+            if (!read) { r.ok = true; break; }
         }
 
+        if (!r.ok) r.body.clear();
+
         if (r.status < 200 || r.status >= 300) {
-            OSTP_LOG_WARN("{} - unexpected HTTP {}  body={}",
-                             url,
-                             r.status,
-                             r.body.size() > 512 ? r.body.substr(0, 512) + "..." : r.body);
+            OSTP_LOG_WARN("{} - unexpected HTTP {} body_bytes={}", url, r.status, r.body.size());
         } else {
-            OSTP_LOG_TRACE("{} - response body={} ({}bytes)",
-                           url ? url : "", r.body, r.body.size());
+            OSTP_LOG_TRACE("{} - response body_bytes={} ok={}", url, r.body.size(), r.ok);
         }
-        r.ok = true;
     }
 
     WinHttpCloseHandle(hRequest);

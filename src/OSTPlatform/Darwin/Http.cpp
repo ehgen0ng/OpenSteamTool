@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 
 #include <algorithm>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -16,9 +17,10 @@
 namespace OSTPlatform::Http {
 namespace {
 
-// WinHTTP's read loop caps the body at 256 KiB; keep parity so callers see the
-// same truncation behaviour on both platforms.
-constexpr size_t kMaxBodyBytes = 256 * 1024;
+struct ResponseBuffer {
+    std::string& body;
+    size_t limit;
+};
 
 void EnsureGlobalInit() {
     static std::once_flag once;
@@ -26,14 +28,16 @@ void EnsureGlobalInit() {
 }
 
 size_t WriteToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    if (size && nmemb > std::numeric_limits<size_t>::max() / size) return 0;
     const size_t total = size * nmemb;
-    auto* body = static_cast<std::string*>(userdata);
-    if (body->size() < kMaxBodyBytes) {
-        const size_t room = kMaxBodyBytes - body->size();
-        body->append(ptr, (std::min)(total, room));
+    auto& buffer = *static_cast<ResponseBuffer*>(userdata);
+    if (total > buffer.limit - buffer.body.size()) return 0;
+    try {
+        buffer.body.append(ptr, total);
+    } catch (...) {
+        // Exceptions cannot cross libcurl's C callback boundary.
+        return 0;
     }
-    // Report the full count as consumed even past the cap, so libcurl finishes the
-    // transfer normally instead of failing with CURLE_WRITE_ERROR.
     return total;
 }
 
@@ -77,7 +81,8 @@ Result Execute(const wchar_t* method,
                uint32_t timeoutResolve,
                uint32_t timeoutConnect,
                uint32_t timeoutSend,
-               uint32_t timeoutRecv) {
+               uint32_t timeoutRecv,
+               uint32_t maxBodyBytes) {
     Result r;
 
     if (!url || !url[0]) {
@@ -95,15 +100,17 @@ Result Execute(const wchar_t* method,
 
     const std::string narrowMethod = NarrowAscii(method);
     curl_slist* headerList = BuildHeaderList(headers);
+    ResponseBuffer buffer{r.body, maxBodyBytes};
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenSteamTool/1.0");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
     // No SIGALRM-based timeouts: Execute runs on worker threads and libcurl's
     // signal path is not thread-safe.
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &r.body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 
     if (!narrowMethod.empty()) {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, narrowMethod.c_str());
@@ -139,6 +146,7 @@ Result Execute(const wchar_t* method,
             OSTP_LOG_WARN("{} - unexpected HTTP {} body_bytes={}", url, r.status, r.body.size());
         }
     } else {
+        r.body.clear();
         OSTP_LOG_WARN("{} - curl_easy_perform failed ({}: {}) status={}",
                       url, static_cast<int>(res), curl_easy_strerror(res), r.status);
     }

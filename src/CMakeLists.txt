@@ -129,6 +129,7 @@ if(APPLE)
         Utils/Config/LuaFileWatcher_macos.cpp
         Utils/SteamMetadata/SteamDiagnostics_macos.cpp
         Utils/SteamMetadata/ManifestClient.cpp
+        Utils/SteamMetadata/ManifestCache.cpp
         Utils/SteamMetadata/IPCLoader_macos.cpp
 
         # CloudRedirect host and shared pipe subsystem
@@ -289,6 +290,7 @@ add_library(OpenSteamTool SHARED
     Utils/Logging/Log.cpp
     Utils/SteamMetadata/IPCLoader.cpp
     Utils/SteamMetadata/ManifestClient.cpp
+    Utils/SteamMetadata/ManifestCache.cpp
     Utils/SteamMetadata/PatternLoader.cpp
     Utils/SteamMetadata/RemoteToml.cpp
     Utils/SteamMetadata/StatsClient.cpp
